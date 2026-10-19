@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { W, H, clamp, ease } from '../../../../engine/util';
-import { rrect, text, OUT } from '../../../../art/draw';
+import { rrect, text, wrap, OUT } from '../../../../art/draw';
 import { basic, canvasTex, noOutline } from '../../../gfx';
 import { G, grp, part, Mats } from '../../../models/kit';
 import type { Level3D } from '../../level';
@@ -125,9 +125,12 @@ export class ItemCard {
     rrect(ctx, -250, -40, 90, 62, 6, '#ffe45a', 4);
     ctx.lineWidth = 4; ctx.strokeStyle = OUT; ctx.beginPath(); ctx.moveTo(-250, -40); ctx.lineTo(-205, -6); ctx.lineTo(-160, -40); ctx.stroke();
     ctx.fillStyle = '#9ad020'; ctx.beginPath(); ctx.arc(-205, -6, 9, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    text(ctx, this.title, -140, -16, { size: 30, color: '#a87a10', stroke: 5 });
-    ctx.font = '400 20px Pangolin, sans-serif';
-    text(ctx, this.body, -140, 22, { size: 19, font: 'body', color: OUT });
+    // (the body wraps inside the card: the letter's line is longer than one row)
+    ctx.font = '400 19px Pangolin, "Comic Sans MS", sans-serif';
+    const lines = wrap(ctx, this.body, 400).slice(0, 3);
+    const y0 = lines.length > 1 ? -26 : -16;
+    text(ctx, this.title, -140, y0, { size: 30, color: '#a87a10', stroke: 5 });
+    lines.forEach((l, i) => text(ctx, l, -140, y0 + 36 + i * 24, { size: 19, font: 'body', color: OUT }));
     ctx.restore();
   }
 }

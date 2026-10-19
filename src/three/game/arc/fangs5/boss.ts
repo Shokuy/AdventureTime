@@ -908,6 +908,9 @@ export class Midnight3 implements Boss3Like, Netted {
   private barkPastila(s: string) { this.sayAt('p', s); }
 
   private shadow(L: Level3D, dt: number) {
+    // solo: the night waits while my hero is down — the cannon must not win the fight under the «ОЙ-ОЙ-ОЙ!» card (the
+    // victory scenes would play over it, and «Ещё разок!» would rebuild the level into phase 3 again)
+    if (!L.nl && L.player.dead) return;
     const party = this.party();
     // the charge (paused for a moment after a hit on Пастила)
     this.pauseT -= dt;

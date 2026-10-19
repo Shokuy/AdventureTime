@@ -185,6 +185,7 @@ const scripts: Record<string, ScriptFn> = {
     const g = G(L), c = g.cast, b = g.boss!;
     const C = ARENA.c;
     stageOn(L);
+    L.hud.toasts.length = 0; // (the fight's hints would sit right over his face)
     L.seen.add('f3:won');
     g.won = true;
     L.hud.bossMax = 0;
