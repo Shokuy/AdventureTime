@@ -82,7 +82,7 @@ export class Roofs {
     L.cp(2.4, 13, -2.6);
     L.cp(29, 11, -12.4);
     L.cp(13.5, 10.6, -27.4);
-    L.cp(-21.5, 14, -28.6);
+    L.cp(-21.5, 14, -32.4); // (at the bridge's mouth: every way to the dome passes it)
     // signs (§11)
     L.signAt(11.0, 12.8, 2.4, SIGNS.roofer);
     L.signAt(-19.8, 14, -32.6, SIGNS.hall);

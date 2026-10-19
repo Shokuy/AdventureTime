@@ -189,6 +189,8 @@ export class NightTown {
   private hudT = 99;
   private veilToast = false;
   private t = 0;
+  /** a toast waiting for the chapter banner to clear (it would sit on the banner's lines) */
+  private later: { str: string; t: number; dur: number } | null = null;
   private bats: { g: THREE.Group; rig: VRig; from: THREE.Vector3; to: THREE.Vector3; t: number; d: number }[] = [];
 
   constructor(readonly L: Level3D) {
@@ -494,6 +496,7 @@ export class NightTown {
       this.doneN = done;
     }
     this.hudT += dt;
+    if (this.later && (this.later.t -= dt) <= 0) { L.hud.toast(this.later.str, this.later.dur); this.later = null; }
     const open = done >= REQUIRED.length;
     if (open && !this.veil.open) {
       this.veil.open = true;
@@ -572,6 +575,8 @@ export class NightTown {
 
   /** the intro's first toast with the button word */
   static presnyakToast() { return actText(TOAST.presnyak); }
+  /** a toast in `secs` (after the chapter banner) */
+  toastLater(str: string, secs: number, dur: number) { this.later = { str, t: secs, dur }; }
 }
 
 // ───────────────────────── helpers ─────────────────────────

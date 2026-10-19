@@ -117,7 +117,8 @@ function* intro(L: Level3D): Script {
   yield L.camBack(0.6);
   L.hud.showChapter(TITLE.banner, TITLE.town);
   L.bannerShown = true;
-  L.hud.toast(NightTown.presnyakToast(), 7);
+  // (after the chapter banner: the long two-line toast used to run into its lines)
+  T.toastLater(NightTown.presnyakToast(), 3.6, 8);
 }
 
 /** 5.3 exit_fangs1_town — at the clock tower's door */
