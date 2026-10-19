@@ -682,6 +682,8 @@ export class HeroTeam {
     if (p.kind !== this.hintKind) { this.hintKind = p.kind; this.hintT = 0; }
     if (this.hintT < 0 || isPrologueLevel(L.def.id)) return;
     if (!p.control || L.worldCut || L.letterbox > 0.05 || L.paused || p.dead) return;
+    // not over the chapter card: ~1 s after it is gone
+    if (L.hud.chapter) { this.hintT = Math.min(this.hintT, 0.5); return; }
     this.hintT += dt;
     if (this.hintT < 1.5) return;
     this.hintT = -1;

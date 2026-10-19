@@ -45,6 +45,9 @@ const MAP_SEL = 'mapsel'; //     host -> all: the room's choice { n, f, s, sub }
 const FIG_SCALE = 3.1;
 const WALK_SPEED = 15;
 const WATER_Y = -0.5;
+/** save key: the stirred fog over Лимонное графство (after fangs5) heaved once already; its length (s) */
+const LEMON_STIR = 'map:lemon_stir';
+const LEMON_PULSE = 2.6;
 /** the camera keeps its target inside this box */
 const CAM_BOX = { x0: -46, x1: 50, z0: -38, z1: 30 };
 
@@ -603,6 +606,8 @@ export class WorldMap3D {
   private camT = new THREE.Vector3();
   private camDist = 76;
   private camFocus: { at: THREE.Vector3; t: number } | null = null;
+  /** > 0 while the lemon fog's one-time heave plays */
+  private lemonPulse = 0;
   private toastMsg: { text: string; t: number; color: string } | null = null;
   private shake = 0;
   private hoverNode: string | null = null;
@@ -1330,6 +1335,19 @@ export class WorldMap3D {
       const n = this.nodes.get(this.choice().n);
       if (n) { this.marker.position.set(n.pos.x, n.pos.y + 6 + Math.sin(this.t * 3.2) * 0.45, n.pos.z); this.marker.rotation.y = this.t * 1.5; }
     }
+    // after the arc's finale (fangs5) the fog over Лимонное графство stirs (the land stays locked: a future land);
+    // the first time the map shows it, the clouds heave once
+    const stirred = !!this.prog().fangs5?.done;
+    if (stirred && this.lemonPulse <= 0 && this.t > 0.8 && !this.camFocus && !save.has(LEMON_STIR)) {
+      save.collect(LEMON_STIR);
+      save.write();
+      this.lemonPulse = LEMON_PULSE;
+      const ln = this.nodes.get('lemon');
+      // (the camera glances there like at a reveal; any key skips it)
+      if (ln) { this.camFocus = { at: ln.pos.clone(), t: LEMON_PULSE + 0.6 }; this.fx.dust(ln.pos.clone().add(V(0, 1.5, 0)), 14); audio.sfx('whoosh', { pitch: 0.6, volume: 0.7 }); }
+      this.toast('Туман над Лимонным графством зашевелился…', '#fff2a0');
+    }
+    this.lemonPulse = Math.max(0, this.lemonPulse - dt);
     for (const n of this.nodes.values()) {
       // reveal: silhouettes take their colours, the clouds drift off
       if (n.reveal > 0) {
@@ -1342,9 +1360,14 @@ export class WorldMap3D {
       fm.visible = n.fogK > 0.01;
       if (fm.visible) {
         const k = ease.inOut(n.fogK), out = 1 - k;
+        // stirred fog: faster, wider drift; the one-time heave: a swelling, shaking pulse that dies down
+        const stir = stirred && n.ep.id === 'lemon';
+        const sp = stir ? 3.2 : 1, amp = stir ? 1.6 : 1;
+        const pk = stir ? this.lemonPulse / LEMON_PULSE : 0;
         n.fog.items.forEach((f, i) => {
-          FP.set(f.base.x + f.dir.x * out * 12 + Math.sin(this.t * 0.25 + f.ph) * 0.5, f.base.y + out * 4 + Math.sin(this.t * 0.6 + f.ph) * 0.18, f.base.z + f.dir.z * out * 12);
-          FS.copy(f.s).multiplyScalar(Math.max(0.001, k));
+          const jig = pk > 0 ? Math.sin(this.t * 38 + f.ph * 7) * 0.35 * pk : 0;
+          FP.set(f.base.x + f.dir.x * out * 12 + Math.sin(this.t * 0.25 * sp + f.ph) * 0.5 * amp + jig, f.base.y + out * 4 + Math.sin(this.t * 0.6 * sp + f.ph) * 0.18 * amp, f.base.z + f.dir.z * out * 12 + (stir ? Math.cos(this.t * 0.3 * sp + f.ph) * 0.4 : 0) - jig);
+          FS.copy(f.s).multiplyScalar(Math.max(0.001, k) * (1 + (stir ? 0.05 * Math.sin(this.t * 1.7 + f.ph) : 0) + 0.22 * Math.sin(pk * Math.PI)));
           FM.compose(FP, FQ, FS);
           fm.setMatrixAt(i, FM);
         });
@@ -1599,8 +1622,14 @@ export class WorldMap3D {
     if (!ep.hub && !ep.soon) {
       y += 28;
       const m = prog[ep.id]?.medal ?? 0;
-      const stars = '★'.repeat(m) + '☆'.repeat(3 - m);
-      text(ctx, stars, 18, y, { size: 24, color: m ? '#f2b81a' : n.state === 'locked' ? '#6a6478' : '#c8b8a0', stroke: m ? 3 : 0 });
+      // earned stars gold, the rest pale (one colour for all three read as «★★★» even with one medal)
+      let sx = 18;
+      if (m > 0) {
+        const got = '★'.repeat(Math.min(3, m));
+        text(ctx, got, sx, y, { size: 24, color: '#f2b81a', stroke: 3 });
+        sx += ctx.measureText(got).width;
+      }
+      if (m < 3) text(ctx, '☆'.repeat(3 - Math.max(0, m)), sx, y, { size: 24, color: n.state === 'locked' ? '#6a6478' : '#c8b8a0' });
       const st = n.state === 'done' ? 'Пройдено ✓' : n.state === 'available' ? 'Новая серия!' : '';
       if (st) text(ctx, st, cw - 18, y - 2, { size: 17, font: 'body', color: n.state === 'done' ? '#3a8a3a' : '#e8383d', align: 'right' });
     }
