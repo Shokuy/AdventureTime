@@ -505,7 +505,7 @@ export class Morok3 implements Boss3Like, Netted {
     this.chooseFake(L, true);
     if (!L.nl) this.castJoin();
   }
-  /** host: who she copies now (solo: me first, later one of the four on the veranda; co-op: a real player) */
+  /** host: who she copies now (solo: me first — unless I play Ноки: she never copies her —, then one of the four on the veranda; co-op: a real player) */
   private chooseFake(L: Level3D, first: boolean) {
     let who = '', kind: HeroKind = L.player.kind;
     if (L.nl) {
@@ -514,7 +514,7 @@ export class Morok3 implements Boss3Like, Netted {
       const pool = ids.filter((i) => i !== cur);
       who = choose(pool.length ? pool : ids.length ? ids : [net.myId]);
       kind = who === net.myId ? L.player.kind : (L.remote(who)?.kind ?? 'tosha');
-    } else if (first || !this.cast.length) { who = 'me'; kind = L.player.kind; }
+    } else if ((first || !this.cast.length) && L.player.kind !== 'noki') { who = 'me'; kind = L.player.kind; }
     else {
       // (never Ноки: she has no shadow of her own — she stays by the rail and strums instead)
       const kinds = this.cast.map((n) => n.kind as HeroKind).filter((k) => k !== this.fake?.kind && k !== 'noki');
