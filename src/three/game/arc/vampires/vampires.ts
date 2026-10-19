@@ -178,7 +178,14 @@ export abstract class Vamp3 extends Enemy3 implements VampLike {
   /** turn toward the direction of flight (rate-limited, so turns read as arcs) */
   protected faceVel(dt: number, rate = 7) {
     const b = this.body;
-    if (Math.hypot(b.vel.x, b.vel.z) > 0.6) this.faceToward(b.pos.x + b.vel.x, b.pos.z + b.vel.z, dt, rate);
+    const hs = Math.hypot(b.vel.x, b.vel.z);
+    if (hs > 0.6) this.faceToward(b.pos.x + b.vel.x, b.pos.z + b.vel.z, dt, rate + 10 * Math.max(0, 1 - hs / 4));
+  }
+  /** which way to circle (cx, cz) to keep the current momentum (+1 / −1) */
+  protected circleDirFor(cx: number, cz: number, fallback: number) {
+    const b = this.body;
+    const d = -(b.pos.z - cz) * b.vel.x + (b.pos.x - cx) * b.vel.z;
+    return Math.abs(d) < 0.3 ? fallback : d > 0 ? 1 : -1;
   }
   /** desired velocity that circles (cx, cz) at radius R (dir ±1), correcting radius smoothly; y toward gy */
   protected circleVel(out: THREE.Vector3, cx: number, cz: number, R: number, speed: number, dir: number, gy: number) {
@@ -540,23 +547,27 @@ export class Bat3 extends Vamp3 {
     if ((this.flapT -= dt) <= 0) { this.flapT = rand(0.9, 1.6); if (t) audio.sfx('batFlap', { volume: 0.25, pitch: rand(0.9, 1.3) }); }
     if (this.act === 'dive') {
       // accelerate along the dive line; steer a little toward him only in its first part (readable, dodgeable)
-      this.diveV = Math.min(13, this.diveV + 34 * dt);
+      this.diveV = Math.min(13, this.diveV + 30 * dt);
       if (t && this.pr < 0.25) {
         v.copy(t.center(v2)).sub(this.center(v3)).normalize();
         const ang = this.dir.angleTo(v);
         if (ang > 1e-3) this.dir.lerp(v, Math.min(1, (1.6 * dt) / ang)).normalize();
       }
-      b.vel.copy(this.dir).multiplyScalar(this.diveV);
+      // (velocity eases onto the dive line: a strong but finite acceleration, no snap)
+      v.copy(this.dir).multiplyScalar(this.diveV).sub(b.vel);
+      const dl = v.length(), mx = 60 * dt;
+      b.vel.addScaledVector(v, dl > mx ? mx / dl : 1);
       this.faceToward(b.pos.x + this.dir.x, b.pos.z + this.dir.z, dt, 14);
       if (!this.hit) for (const h of L.alivePlayers()) {
         if (h.center(v2).distanceTo(this.center(v)) < 0.62) { this.hit = true; h.hurt(L, 1, b.pos.clone()); break; }
       }
+      // pull out early enough to clear the floor (≈ 0.2 s before it)
       const gy = L.phys.groundAt(b.pos.x, b.pos.z, b.pos.y + 0.3, 0.2);
-      const low = gy > -1e8 && b.pos.y - gy < 0.45 && this.dir.y < 0;
+      const low = gy > -1e8 && b.vel.y < 0 && (b.pos.y - gy - 0.25) / -b.vel.y < 0.2;
       const passed = t ? this.dir.dot(v.copy(t.center(v2)).sub(this.center(v3))) < -0.4 : true;
       if (this.at <= 0 || b.hitWall || b.onGround || this.hit || low || passed) {
         this.go('swoop', 0.9);
-        if (b.onGround || low) b.vel.y = Math.max(b.vel.y, 1.5);
+        if (b.onGround) b.vel.y = Math.max(b.vel.y, 0);
         audio.sfx('whoosh', { volume: 0.2, pitch: 2 });
       }
       return;
@@ -568,8 +579,11 @@ export class Bat3 extends Vamp3 {
       const sp = Math.max(4.5, hs * 0.92);
       const ty = t ? t.center(v2).y + 2.1 : this.home.y;
       w.set(fx * sp, clamp((ty - b.pos.y) * 3 + 1.5, 1, 5.5), fz * sp);
-      this.fly(L, K, w, 22, dt, true, 0.6);
-      if (this.at <= 0 || (this.pr > 0.4 && b.pos.y > ty - 0.3)) this.go(t ? 'orbit' : 'fly', rand(1.1, 2));
+      this.fly(L, K, w, 28, dt, true, 0.6);
+      if (this.at <= 0 || (this.pr > 0.4 && b.pos.y > ty - 0.3)) {
+        if (t) this.orbitDir = this.circleDirFor(t.pos.x, t.pos.z, this.orbitDir);
+        this.go(t ? 'orbit' : 'fly', rand(1.1, 2));
+      }
       return;
     }
     if (!t) {
@@ -587,13 +601,13 @@ export class Bat3 extends Vamp3 {
       w.set(0, (tc.y + 2 - b.pos.y) * 1.5, 0);
       this.fly(L, K, w, 9, dt, false);
       this.faceToward(tc.x, tc.z, dt, 10);
-      if (this.at <= 0) { K.alarm(b.pos, 18, t); this.go('orbit', rand(0.8, 1.6)); }
+      if (this.at <= 0) { K.alarm(b.pos, 18, t); this.orbitDir = this.circleDirFor(tc.x, tc.z, this.orbitDir); this.go('orbit', rand(0.8, 1.6)); }
       return;
     }
     if (this.act === 'prep') {
       // wind-up: brake, rear back and up a little, face him
       v.set(b.pos.x - tc.x, 0, b.pos.z - tc.z).normalize();
-      w.set(v.x * 1.4, 1.2, v.z * 1.4);
+      w.set(v.x * 0.9, 1.2, v.z * 0.9);
       this.fly(L, K, w, 16, dt, false);
       this.faceToward(tc.x, tc.z, dt, 14);
       if (this.at <= 0) {
@@ -605,7 +619,7 @@ export class Bat3 extends Vamp3 {
       return;
     }
     // orbit above him (banked circles); dive when it's my turn (one bat per hero at a time) and he's out of the light
-    if (this.act !== 'orbit') this.go('orbit', rand(0.8, 1.6));
+    if (this.act !== 'orbit') { this.orbitDir = this.circleDirFor(tc.x, tc.z, this.orbitDir); this.go('orbit', rand(0.8, 1.6)); }
     const lit = K.sunAt(t.pos) > 0.3;
     const R = lit ? 6.5 : 3.4;
     const gy = tc.y + 2.1 + Math.sin(this.t * 2.2) * 0.35;
@@ -674,8 +688,10 @@ export class Flyer3 extends Vamp3 {
         }
         return;
       case 'dive': {
-        this.diveV = Math.min(16, this.diveV + 42 * dt);
-        b.vel.copy(this.dir).multiplyScalar(this.diveV);
+        this.diveV = Math.min(16, this.diveV + 40 * dt);
+        v.copy(this.dir).multiplyScalar(this.diveV).sub(b.vel);
+        const dl = v.length(), mx = 70 * dt;
+        b.vel.addScaledVector(v, dl > mx ? mx / dl : 1);
         this.faceToward(b.pos.x + this.dir.x, b.pos.z + this.dir.z, dt, 14);
         if (!this.hit) for (const h of L.alivePlayers()) {
           if (h.center(v2).distanceTo(this.center(v)) < 1.0) { this.hit = true; if (h.hurt(L, 1, b.pos.clone(), new THREE.Vector3(this.dir.x * 8, 6, this.dir.z * 8))) { K.bland(h, 2); audio.sfx('bite'); } break; }
@@ -706,7 +722,7 @@ export class Flyer3 extends Vamp3 {
       this.fly(L, K, w, 5, dt);
       return;
     }
-    if (this.act !== 'stalk') this.go('stalk');
+    if (this.act !== 'stalk') { this.circDir = this.circleDirFor(t.pos.x, t.pos.z, this.circDir); this.go('stalk'); }
     const lit = K.sunAt(t.pos) > 0.3;
     const R = lit ? 8 : 5.5;
     // circle him high up (banking), the circle travels with him

@@ -138,7 +138,8 @@ const scripts: Record<string, (L: Level3D) => Script> = {
   *fangs5_portraits(L) {
     const c = R(L).cast;
     L.cutscene(true);
-    c.at('noki', 5.5, 0, -6, Math.PI / 2); c.at('pastila', 4.3, 0, -4.3, Math.PI / 2 + 0.55, 'idle', 'surprised'); c.at('bublik', 3.7, 0, -8.4, Math.PI / 2 - 0.5); // (clear of the hall's column at (4.6, −8), r 0.5) c.at('tosha', 3.0, 0, -5.8, Math.PI / 2);
+    c.at('noki', 5.5, 0, -6, Math.PI / 2); c.at('pastila', 4.3, 0, -4.3, Math.PI / 2 + 0.55, 'idle', 'surprised'); c.at('bublik', 5.3, 0, -7.4, Math.PI / 2 - 0.5); c.at('tosha', 3.0, 0, -5.8, Math.PI / 2);
+    // (Бублик by Ноки: at (4.2, −7.8) he stood inside the hall's column at (4.6, −8), his close-up shot from behind it)
     yield shot(L, V3(3.8, 2.2, -7.3), V3(7.4, 3.9, -6));
     yield shot(L, V3(4.6, 2.0, -7.0), V3(7.4, 4.1, -6), 2.5);
     yield faceShot(L, 'pastila', 2.2, 0.4);

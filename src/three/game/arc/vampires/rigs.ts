@@ -241,18 +241,18 @@ function batWings(parent: THREE.Object3D, M: Mats, span: number, mem: string, bo
     const sh = grp(root); sh.rotation.order = 'ZYX';
     const inner = part(sh, wingShapes(), memM, [0, 0, 0], [arm, 1, arm], [-0.18, 0, 0]);
     inner.castShadow = true;
-    part(sh, G.capsule(0.018, 1), boneM, [arm * 0.5, 0.004, arm * 0.06], [span * 0.9, arm, span * 0.9], [0, 0, Math.PI / 2], fo);
+    noOutline(part(sh, G.capsule(0.022, 1), boneM, [arm * 0.5, 0.004, arm * 0.06], [span * 0.9, arm, span * 0.9], [0, 0, Math.PI / 2], fo));
     const wr = grp(sh, [arm, 0, 0]); wr.rotation.order = 'ZYX';
     const outer = part(wr, wingOuter(), memM, [0, 0, 0], [hand, 1, hand], [-0.12, 0, 0]);
     outer.castShadow = true;
     // finger bones: wrist → each tip
     for (const [tx, tz] of [[1.15, 0.05], [0.98, -0.42], [0.62, -0.78]] as const) {
       const len = Math.hypot(tx, tz) * hand;
-      const b = part(wr, G.capsule(0.012, 1), boneM, [tx * hand * 0.5, 0.005, tz * hand * 0.5], [span * 0.7, len, span * 0.7], [0, 0, 0], fo);
+      const b = noOutline(part(wr, G.capsule(0.014, 1), boneM, [tx * hand * 0.5, 0.005, tz * hand * 0.5], [span * 0.7, len, span * 0.7], [0, 0, 0], fo));
       b.rotation.set(0, Math.atan2(-tz, tx), Math.PI / 2, 'YXZ');
     }
     // a little thumb claw at the wrist
-    part(wr, G.cone(), boneM, [0.01, 0.02, span * 0.05], [0.015 * span * 3, 0.05 * span, 0.015 * span * 3], [-1.2, 0, 0], fo);
+    part(wr, G.cone(), boneM, [0.01, 0.02, span * 0.05], [0.025 * span, 0.07 * span, 0.025 * span], [-1.2, 0, 0], fo);
     sides.push({ sh, wr, s });
   }
   return {
@@ -431,7 +431,7 @@ export function createBat(): VRig {
   const ears = [batEar(bob, M, [0.07, 0.09, -0.01], 1, 0.15, '#3b2b52', '#e88aa8', 0.45), batEar(bob, M, [-0.07, 0.09, -0.01], -1, 0.15, '#3b2b52', '#e88aa8', 0.45)];
   ears[1].scale.x = -1;
   const F = vface(bob, M, { R: R * 0.95, center: [0, 0.0, 0], eyeYaw: 0.4, eyePitch: 0.18, eyeW: 0.042, eyeH: 0.048, lidMat: fur, lidRest: 0.18, brow: '#1a1028', browThick: 0.012, mouthPitch: -0.25, mouthW: 0.045, rest: 'smile', nose: { mat: M.get('#e88aa8'), w: 0.02, h: 0.016, pitch: -0.05 }, glintSize: 0.13 });
-  const W = batWings(bob, M, 0.56, '#5d4380', '#241830', [0.1, 0.02, -0.01]);
+  const W = batWings(bob, M, 0.56, '#5d4380', '#3a2a52', [0.1, 0.02, -0.01]);
   // little feet + a tail membrane
   const feet: THREE.Group[] = [];
   for (const s of [1, -1]) {
@@ -450,8 +450,8 @@ export function createBat(): VRig {
       const hk = hit.update(dt, a.flash);
       let wRate = 3.3 + clamp(a.speed / 6, 0, 1) * 0.6, up = 0.95, down = -0.75, wTuck = 0, wGlide = 0, wSpread = 0, ex: HeroExpr = 'normal', wGlow = 0.15, wPitch = clamp(a.pitch ?? 0, -1.1, 1.1), wHang = 0;
       switch (a.st) {
-        case 'screech': wRate = 6.2; up = 1.15; down = -0.5; ex = 'angry'; wGlow = 0.9; wPitch = -0.35; wSpread = 1; break;
-        case 'prep': wRate = 2.2 + a.p * 1.5; up = 1.2; down = -0.2; ex = 'angry'; wGlow = 0.5 + 0.5 * a.p; wPitch = -0.45 * easeOut(a.p); wSpread = 1; break;
+        case 'screech': wRate = 7.5; up = 0.55; down = -0.15; ex = 'angry'; wGlow = 0.9; wPitch = -0.35; wSpread = 1; break;
+        case 'prep': wRate = 2.6 + a.p * 2; up = 0.75; down = 0.05; ex = 'angry'; wGlow = 0.5 + 0.5 * a.p; wPitch = -0.45 * easeOut(a.p); wSpread = 1; break;
         case 'dive': wTuck = 0.92; ex = 'angry'; wGlow = 1; break;
         case 'swoop': wGlide = 1 - seg(a.p, 0.45, 0.8); wRate = 4.6; up = 1.1; down = -0.85; ex = 'normal'; wGlow = 0.4; break;
         case 'stun': wRate = 1.6; up = 0.5; down = -0.3; ex = 'hurt'; break;
@@ -516,7 +516,7 @@ export function createFlyer(): VRig {
   // mohawk
   for (let i = 0; i < 4; i++) part(head, G.cone(), M.get(HAIR), [0, 0.17 - i * 0.01, 0.08 - i * 0.07], [0.035, 0.11 - i * 0.012, 0.05], [-0.4 - i * 0.25, 0, 0], fo);
   const F = vface(head, M, { R, eyeYaw: 0.38, eyePitch: 0.08, eyeW: 0.058, eyeH: 0.065, lidMat: skin, lidRest: 0.28, brow: HAIR, browThick: 0.018, mouthPitch: -0.36, mouthW: 0.065, nose: { mat: skinD, w: 0.024 }, glintSize: 0.19 });
-  const W = batWings(body, M, 1.0, '#3d2b5c', '#1e1630', [0.13, 0.14, -0.06]);
+  const W = batWings(body, M, 1.0, '#4a3470', '#2c2042', [0.13, 0.14, -0.06]);
   // legs with talons
   const legs: THREE.Group[] = [];
   for (const s of [1, -1]) {
@@ -557,9 +557,9 @@ export function createFlyer(): VRig {
       W.set(fl, wr, Math.max(fc.fold * flapK, tuck), tuck * 0.9, 0);
       bank = damp(bank, clamp(a.bank ?? 0, -1, 1) * 0.75, 6, dt);
       pitch = damp(pitch, wPitch, 8, dt);
-      const lie = sprawl * 1.35;
+      const lie = -sprawl * 1.25;
       tilt.rotation.set(pitch + lie + hk * -0.5, 0, -bank + (a.st === 'stun' || a.st === 'ground' ? Math.sin(t * 5) * 0.12 : 0));
-      tilt.position.y = 0.5 - sprawl * 0.3 + fc.down * 0.04 * flapK + Math.sin(t * 1.7) * 0.02;
+      tilt.position.y = 0.5 - sprawl * 0.2 + fc.down * 0.04 * flapK + Math.sin(t * 1.7) * 0.02;
       body.scale.set(1 + fc.down * 0.04 * flapK, 1 - fc.down * 0.05 * flapK, 1);
       for (const [i, l] of legs.entries()) l.rotation.x = legK * 0.7 - lie * 0.3 + Math.sin(t * 3 + i) * 0.12 * (1 - legK);
       tail.rotation.x = Math.sin(t * 2.4) * 0.25 - tuck * 0.4;

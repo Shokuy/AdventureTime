@@ -14,8 +14,8 @@ const wrapA = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 const smooth = (a: number, b: number, x: number) => { const k = invLerp(a, b, x); return k * k * (3 - 2 * k); };
 /** the player's zoom range (wheel / zoom keys / settings «Дальность камеры») */
 export const ZOOM_MIN = 4, ZOOM_MAX = 13;
-/** inside an ambush ring the orbit never gets closer to the hero than this (it rides up over him instead) */
-const RING_NEAR = 3.8;
+/** inside a raised ambush ring: the orbit keeps this far inside the bars; it tilts up to RING_PITCH (rad) to do so */
+const RING_MARGIN = 0.8, RING_PITCH = 0.85;
 /** the vertical field of view every cutscene shot (L.shot) is framed for */
 const CINE_FOV = 58;
 
@@ -74,7 +74,7 @@ export class TPCamera {
   camSkip: ((c: Collider) => boolean) | null = null;
   /**
    * raised ambush rings (arena bars) around: instead of being shoved against their tall invisible wall (it used to end
-   * up inside a bar, 1.2 m from the hero, the hero filling the screen) the orbit stays inside the ring (ringLift).
+   * up inside a bar, 1.2 m from the hero, the hero filling the screen) the orbit tilts up inside the ring (ringLift).
    * Set by the level each frame (x, z: centre; r: radius; y0..y1: the bars' height).
    */
   rings: { x: number; z: number; r: number; y0: number; y1: number }[] = [];
@@ -210,7 +210,7 @@ export class TPCamera {
       let d = this.dist;
       if (phys) {
         const ringy = this.rings.length > 0;
-        if (ringy) d = this.ringLift(af, tmpD, d);
+        if (ringy) this.ringLift(af, tmpD, d);
         const hit = phys.raycast(af, tmpD, d + 0.4, ringy ? this.skipRing : this.camSkip ?? undefined);
         if (hit < d + 0.4) d = Math.max(1.2, hit - 0.4);
       }
@@ -237,31 +237,29 @@ export class TPCamera {
   }
 
   /**
-   * inside a raised ring of bars the orbit stays inside the ring: the ring pulls the camera in like a wall would, but
-   * never closer than RING_NEAR — where it would (my hero by the bars, the camera turned toward them) the camera rides
-   * UP over the hero instead of being shoved into the bars (the old 1.2 m, inside a bar, the hero filling the screen).
-   * Turns `dir` in place; returns the orbit distance along it.
+   * inside a raised ring of bars: where the ring would cut the orbit short (my hero by the bars, the camera turned
+   * toward them) the camera tilts UP — the same orbit length, steeper — so it stays inside the ring; past RING_PITCH it
+   * keeps that tilt and looks over / through the thin bars from outside (the level hides the bars in its way, see
+   * Level3D.ringBarsClear) instead of being shoved against their tall invisible wall (it used to end up inside a bar,
+   * 1.2 m from the hero, the hero filling the screen). Continuous: at RING_PITCH both cases are the same spot.
+   * Turns `dir` in place.
    */
   private ringLift(o: THREE.Vector3, dir: THREE.Vector3, d: number) {
-    const MARGIN = 0.8, NEAR = Math.min(RING_NEAR, d);
     for (const g of this.rings) {
       const ox = o.x - g.x, oz = o.z - g.z;
       if (Math.hypot(ox, oz) > g.r || o.y < g.y0 - 1 || o.y > g.y1 + 1) continue;
       const hl = Math.hypot(dir.x, dir.z);
       if (hl < 1e-4) continue;
       const ux = dir.x / hl, uz = dir.z / hl;
-      // how far the camera may go horizontally (to R − MARGIN along the orbit's bearing)
-      const R = g.r - MARGIN, b = ox * ux + oz * uz, c0 = ox * ox + oz * oz - R * R;
+      // how far the camera may go horizontally (to R − margin along the orbit's bearing)
+      const R = g.r - RING_MARGIN, b = ox * ux + oz * uz, c0 = ox * ox + oz * oz - R * R;
       const disc = b * b - c0;
-      const allow = Math.max(0.6, disc > 0 ? -b + Math.sqrt(disc) : 0);
+      const allow = Math.max(0, disc > 0 ? -b + Math.sqrt(disc) : 0);
       if (d * hl <= allow) continue;
-      const h = allow;
-      const v = Math.max(d * dir.y, Math.sqrt(Math.max(0, NEAR * NEAR - h * h)));
-      dir.set(ux * h, v, uz * h);
-      d = dir.length();
-      dir.multiplyScalar(1 / d);
+      const p0 = Math.asin(clamp(dir.y, -1, 1));
+      const p = Math.max(p0, Math.min(RING_PITCH, Math.acos(clamp(allow / d, 0, 1))));
+      dir.set(ux * Math.cos(p), Math.sin(p), uz * Math.cos(p));
     }
-    return d;
   }
 
   /** cinematic: camera moves toward cinePos and looks at cineLook */

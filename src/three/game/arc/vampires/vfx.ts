@@ -638,7 +638,7 @@ export class DeathPoof implements Actor3 {
     const t = this.t, s = this.style, k = Math.min(1, t / this.dur);
     const h = this.holder;
     if (!this.popped) {
-      this.anim.flash = 0.6 + 0.4 * Math.sin(t * 40);
+      this.anim.flash = 0.45 + 0.35 * Math.sin(t * 40);
       this.anim.p = k;
       this.rig.update(dt, this.anim);
       if (s.kind === 'topple') {

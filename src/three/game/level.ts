@@ -1438,7 +1438,32 @@ export class Level3D {
     const p = this.player;
     this.tcam.aimK = p.aimK;
     this.tcam.update(dt, p.pos, p.vel, this.phys, p.control && !p.dead);
+    this.ringBarsClear();
     updateSun(this.sun, p.pos, this.def.sun.dir, this.tcam.cam);
+  }
+
+  /**
+   * a camera outside a raised ring of bars (it tilted up over them, TPCamera.ringLift) looks at my hero through a gap:
+   * the bars right by the lens and those on the line of sight are hidden (the rest of the ring stays)
+   */
+  private ringBarsClear() {
+    const cam = this.tcam.cam.position, f = this.tcam.focus;
+    for (const a of this.arenas) {
+      if (!a.bars.visible) continue;
+      const cx = a.center.x, cz = a.center.z;
+      const out = Math.hypot(cam.x - cx, cam.z - cz) > a.radius - 0.6 && this.tcam.mode !== 'cine';
+      for (const b of a.bars.children) {
+        let hide = false;
+        if (out) {
+          const bx = b.position.x, bz = b.position.z;
+          // distance from the bar to the camera → focus segment (on the ground plane)
+          const sx = f.x - cam.x, sz = f.z - cam.z, ll = sx * sx + sz * sz || 1;
+          const t = Math.max(0, Math.min(1, ((bx - cam.x) * sx + (bz - cam.z) * sz) / ll));
+          hide = Math.hypot(cam.x + sx * t - bx, cam.z + sz * t - bz) < 0.75;
+        }
+        b.visible = !hide;
+      }
+    }
   }
 
   /** co-op tick: my overlays (pause, item card, results) and my hit-stop never stop the shared world */

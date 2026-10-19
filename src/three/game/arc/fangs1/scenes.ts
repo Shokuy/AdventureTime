@@ -134,8 +134,8 @@ function* exitTown(L: Level3D): Script {
   cast.place('bublik', d.x + 1.0, 0, d.z + 3.3, Math.PI - 0.2);
   cast.place('pastila', d.x - 0.9, 0, d.z + 2.5, Math.PI);
   cast.place('noki', d.x - 2.0, 0, d.z + 3.1, Math.PI + 0.3);
-  // from below, over Тоша's shoulder, up the tower
-  yield L.shot(V(d.x + 1.3, 0.75, d.z + 5.0), V(d.x, 6.4, d.z - 2), 0);
+  // from low on the square: Тоша looking up, the porch and the tower rising over the four (Тоша kept above the box)
+  yield L.shot(V(d.x + 2.6, 1.0, d.z + 10.5), V(d.x, 4.2, d.z - 1), 0);
   cast.pose('tosha', 'lookUp');
   yield* lines(L, cast, EXIT_TOWN.slice(0, 1));
   cast.pose('tosha', null);
@@ -188,7 +188,7 @@ function* roofsIntro(L: Level3D): Script {
   for (const k of CAST) { const m = M[k]; cast.place(k, m.x, m.y, m.z, Math.PI / 2); }
   yield all(L.shot(high.clone().add(V(0, 0.4, 0)), HALL.c.clone().add(V(0, 3, 0)), 3.2), wait(1.2));
   // the four on the gallery, the bridge behind the camera
-  yield L.shot(V(8.7, 14.7, 0.0), V(3.7, 14.0, -0.05), 0.6);
+  yield L.shot(V(8.4, 15.3, 0.0), V(3.6, 13.95, -0.05), 0.6);
   for (const k of CAST) cast.look(k, cast.pos('bublik'));
   cast.look('bublik', V(9, 13, 0));
   yield* lines(L, cast, ROOFS_INTRO.slice(0, 2));
