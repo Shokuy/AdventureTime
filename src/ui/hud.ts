@@ -30,6 +30,8 @@ export class Hud {
   hpPulse = 0;
   lastHp = -1;
   toasts: { text: string; t: number; dur: number }[] = [];
+  /** where the toast column starts at the least (a first-time card at the left top pushes it down) */
+  toastTop = 0;
   /** where the toast stack ends (the banner goes below it) */
   private toastBottom = 140;
   chapter: { title: string; sub: string; t: number } | null = null;
@@ -141,7 +143,7 @@ export class Hud {
 
     // toasts: a centre column (a long hint wraps instead of running under the corner tips — the co-op scoreboard tip,
     // the combo line), stacked by their real height
-    let ty = 140;
+    let ty = Math.max(140, this.toastTop);
     if (showToasts) this.toasts.forEach((tt) => {
       const a = tt.t < 0.25 ? tt.t / 0.25 : tt.t > tt.dur - 0.4 ? (tt.dur - tt.t) / 0.4 : 1;
       const y = ty - (1 - ease.outCubic(clamp(tt.t * 4, 0, 1))) * 20;

@@ -1562,7 +1562,7 @@ export class Level3D {
   private tips(dt: number) {
     const p = this.player;
     const free = p.control && !p.dead && !this.inCutscene && !this.popup.active && !this.results && this.letterbox < 0.05;
-    this.ctlHint.update(dt, free && this.t > 2.5);
+    this.ctlHint.update(dt, free && this.t > 2.5 && !this.hud.chapter);
     if (!free || !this.ctlHint.done) return;
     this.wallT = this.tcam.pulledIn ? this.wallT + dt : 0;
     if (this.wallT > 2.5 && seenOnce('tip:zoomWall')) this.hud.toast(zoomTip('wall'), 6);
@@ -1612,6 +1612,8 @@ export class Level3D {
     this.drawChaseMeter(ctx);
     // (no toasts / chapter card / banner under the pause or a hub panel — the shop — that covers the middle)
     const panel = !!(this.refs.town as { overlay?: unknown } | undefined)?.overlay;
+    // (the «Как играть» card last frame: the toasts go below it instead of under its rows)
+    this.hud.toastTop = this.paused ? 0 : this.ctlHint.bottom + 10;
     this.hud.draw(ctx, this.player, this.t, this.player.dead ? 0 : clamp(1 - this.letterbox * 1.5, 0, 1), !this.paused && !panel);
     this.dialog.draw(ctx);
     for (const pl of this.plugins) pl.draw?.(ctx);

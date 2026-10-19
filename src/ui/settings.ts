@@ -774,7 +774,10 @@ export class ControlsHint {
     if (this.t > 16) this.done = true;
   }
   dismiss() { if (this.on && this.t < 15.4) this.t = 15.4; else if (!this.on) this.done = true; }
+  /** the card's bottom edge on screen while it shows (0 = hidden): the hud starts its toast column below it */
+  bottom = 0;
   draw(ctx: C) {
+    this.bottom = 0;
     if (this.done || !this.on || this.held) return;
     const a = clamp(Math.min(this.t * 3, (16 - this.t) / 0.6), 0, 1);
     if (a <= 0) return;
@@ -796,6 +799,7 @@ export class ControlsHint {
       [(cx, cy) => codes(ctx, ['F1', 'Escape'], cx, cy), 'управление и настройки'],
     ];
     const h = 50 + rows.length * rh;
+    this.bottom = y + h + 6;
     ctx.save();
     ctx.globalAlpha = a;
     ctx.translate(-(1 - ease.outCubic(clamp(this.t * 3, 0, 1))) * 40, 0);
