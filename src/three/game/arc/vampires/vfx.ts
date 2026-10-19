@@ -514,13 +514,13 @@ export class QuakeFx implements Actor3 {
     const stone = mat('#6d6380', { flat: true }), stone2 = mat('#8a7f9c', { flat: true });
     for (let i = 0; i < 9; i++) {
       const a = (i / 9) * TAU + rand(-0.2, 0.2), d = rand(0.7, 1.7);
-      const m = new THREE.Mesh(cached('vamp-shard', () => new THREE.ConeGeometry(0.16, 0.6, 4, 1).translate(0, 0.3, 0)), i % 2 ? stone : stone2);
+      const m = new THREE.Mesh(cached('vamp-shard', () => new THREE.ConeGeometry(0.2, 0.42, 5, 1).translate(0, 0.21, 0)), i % 2 ? stone : stone2);
       m.position.set(Math.cos(a) * d, -0.5, Math.sin(a) * d);
       m.rotation.set(rand(-0.4, 0.4) + Math.sin(a) * 0.35, rand(0, TAU), rand(-0.4, 0.4) - Math.cos(a) * 0.35);
-      m.scale.setScalar(rand(0.7, 1.4));
+      m.scale.set(rand(0.45, 0.8), rand(0.4, 0.85), rand(0.45, 0.8));
       m.castShadow = true;
       this.g.add(m);
-      this.shards.push({ m, h: rand(0.25, 0.5), d: rand(0, 0.08) });
+      this.shards.push({ m, h: rand(0.12, 0.3), d: rand(0, 0.08) });
     }
     noOutline(this.wall); noOutline(this.wall2); noOutline(this.ripple); noOutline(this.crack);
     L.scene.add(this.g);
