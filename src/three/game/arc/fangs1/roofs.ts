@@ -32,6 +32,13 @@ const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 export const HALL = { c: V(-21.5, 14, -50), R: 12.2, perch: V(-21.5, 20.7, -50) };
 /** the clock tower's gallery (start) */
 export const GALLERY = V(0, 13, 0);
+/** the door in the clock box onto the gallery (east face, beside the clock face): sill (x, y, z), width, height */
+export const ROOF_DOOR = { x: 2.88, y: 13.3, z: 1.95, w: 0.8, h: 1.55 };
+/**
+ * the story four's marks on the gallery's east side, in the free band between the clock box (half-width 2.85 with its
+ * icing) and the railing (r 4.45) — facing out over the bridge, the way the run starts
+ */
+export const GALLERY_MARKS = { noki: V(3.55, 13, -1.85), bublik: V(3.8, 13, -0.65), tosha: V(3.8, 13, 0.55), pastila: V(3.55, 13, 1.75) };
 
 export function roofsLevel(): Level3Def {
   const p = TOWN_NIGHT;
@@ -223,9 +230,8 @@ export class Roofs {
     }
     gb.cyl(0, 0, 4.6, 12.6, 13.0);
     ringCols(gb, 0, 0, 4.45, 13.0, 13.9, { gapAt: Math.PI / 2, gapHalf: 0.3 });
-    // a little door in the clock box (we came out of it)
-    gb.m(new THREE.PlaneGeometry(1.0, 1.7), tmat(null, '#5a3a2a'), 2.72, 13.85, 0, { ry: Math.PI / 2 });
     this.put(gb.done(0, 0, 0, 0));
+    this.clockDoor(pal);
     // B1 → P1
     this.bridge(6.9, 12.8, 0, 5.2, 2.0, 0);
     this.flat(12.5, 0, 6.2, 6, 12.8, 801);
@@ -275,6 +281,34 @@ export class Roofs {
     V.lantern(17.2, 10.6, -33.6, { r: 4.2, light: false });
     V.lantern(-23.8, 14.0, -27.2, { r: 4, light: false, lit: false });
   }
+
+  /**
+   * the little door in the clock box we come out of (east face, beside the clock): a dark doorway in an icing frame
+   * and a leaf on a hinge that swings out (the intro opens it; ROOF_DOOR is where the heroes step out)
+   */
+  private clockDoor(pal: typeof TOWN_NIGHT) {
+    const L = this.L, D = ROOF_DOOR;
+    const g = new THREE.Group();
+    const dark = new THREE.Mesh(new THREE.PlaneGeometry(D.w, D.h), new THREE.MeshBasicMaterial({ color: '#160c1a' }));
+    dark.position.set(D.x + 0.01, D.y + D.h / 2, D.z); dark.rotation.y = Math.PI / 2;
+    g.add(dark);
+    const icing = tmat(null, pal.icing);
+    for (const sz of [-1, 1]) { const f = new THREE.Mesh(new THREE.BoxGeometry(0.14, D.h + 0.1, 0.12), icing); f.position.set(D.x, D.y + D.h / 2, D.z + sz * (D.w / 2 + 0.06)); g.add(f); }
+    const top = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.14, D.w + 0.36), icing); top.position.set(D.x, D.y + D.h + 0.06, D.z); g.add(top);
+    const step = new THREE.Mesh(new THREE.BoxGeometry(0.4, D.y - 13.0 + 0.02, D.w + 0.2), tmat(null, pal.walls[5])); step.position.set(D.x + 0.12, (D.y + 13.0) / 2, D.z); g.add(step);
+    // the leaf: hinged at the door's +z edge, swings out toward +x
+    const hinge = new THREE.Group(); hinge.position.set(D.x + 0.06, D.y, D.z + D.w / 2);
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(0.07, D.h - 0.04, D.w - 0.04), tmat(null, '#8a4e2e'));
+    leaf.position.set(0, (D.h - 0.04) / 2, -(D.w - 0.04) / 2);
+    hinge.add(leaf);
+    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), tmat(null, '#c8a050')); knob.position.set(0.06, D.h * 0.48, -(D.w - 0.16)); hinge.add(knob);
+    g.add(hinge);
+    L.deco(g);
+    this.doorHinge = hinge;
+  }
+  /** the clock-box door: 0 shut … 1 wide open (swung out short of the railing) */
+  doorOpen(k: number) { if (this.doorHinge) this.doorHinge.rotation.y = -1.4 * k; }
+  private doorHinge: THREE.Group | null = null;
 
   /** an attic box with a bat-sized slot (the walnut inside) */
   private attic(x: number, y: number, z: number) {

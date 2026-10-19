@@ -1,10 +1,13 @@
 import * as THREE from 'three';
-import { basic } from '../gfx';
+import { basic, noOutline } from '../gfx';
 import {
   G, Mats, TAU, clamp, lerp, damp, smooth, seg, easeOut, easeInOut, wrapAngle,
   grp, part, surf, vis, cached, merge, Blinker, arcRibbon,
 } from './kit';
 import type { HeroAnim, HeroExpr, HeroRig, HeroState } from './hero';
+import { Dangle } from './humanoid';
+import { buildToonFace } from './toonFace';
+import { flatten } from './toonKit';
 import { cleanLook, DEFAULT_LOOKS, type HeroLook } from '../../net/profile';
 
 /*
@@ -68,6 +71,8 @@ export function createBublik(look: Partial<HeroLook> = DEFAULT_LOOKS.bublik): He
   const midG = grp(rump, undefined, [Math.PI / 2, 0, 0]); // +Y → +Z
   const mid = part(midG, G.cyl(), fur, [0, SPAN / 2, 0], [GIRTH, SPAN, GIRTH * 0.97]);
   const midBelly = part(midG, G.cyl(), light, [0, SPAN / 2, 0.075], [GIRTH * 0.78, SPAN, GIRTH * 0.72]);
+  // a darker saddle along his back (reads as the long sausage from above)
+  const midSaddle = part(midG, G.sphere(), dark, [0, SPAN / 2, -0.07], [GIRTH * 0.72, SPAN * 0.6, GIRTH * 0.66], undefined, fo);
   const chest = grp(rump, [0, 0, SPAN], undefined, 'chest');
   const chestBall = part(chest, G.sphere(), fur, undefined, [GIRTH * 1.03, GIRTH * 1.03, GIRTH * 1.06]);
   part(chest, G.sphere(), light, [0, -0.045, 0.1], [0.135, 0.15, 0.12]);
@@ -79,10 +84,10 @@ export function createBublik(look: Partial<HeroLook> = DEFAULT_LOOKS.bublik): He
     return { g: G.ball(), p: [Math.cos(a) * 0.15, Math.sin(a) * 0.15, 0.025] as [number, number, number], s: 0.014 };
   }))), M.get('#f2c23a'));
   const tag = grp(collar, [0, -0.16, 0.02]);
-  part(tag, G.torus(0.042, 0.022, 10, 20), tagM, [0, -0.045, 0.03], 1, [0.95, 0, 0]);
+  part(tag, G.torus(0.05, 0.027, 12, 24), tagM, [0, -0.05, 0.03], 1, [0.95, 0, 0]);
   part(tag, cached('bublik-seeds', () => merge([[-0.02, 0.02], [0.022, 0.012], [0.0, 0.035], [-0.03, -0.012], [0.03, -0.018]].map(([x, y]) => ({
     g: G.ball(), p: [x, y, 0.0] as [number, number, number], s: [0.006, 0.004, 0.004] as [number, number, number],
-  })))), M.get('#fff6e0'), [0, -0.045, 0.058], 1, [0.95, 0, 0]);
+  })))), M.get('#fff6e0'), [0, -0.05, 0.064], 1.2, [0.95, 0, 0]);
 
   // ── legs (one stretchy segment each + a big paw) ──
   const legs: Leg[] = [];
@@ -105,55 +110,57 @@ export function createBublik(look: Partial<HeroLook> = DEFAULT_LOOKS.bublik): He
   // tail: two segments, curled up
   const tail = grp(rump, [0, 0.09, -0.17]);
   tail.rotation.order = 'YXZ';
-  part(tail, G.capsule(0.034, 0.1), fur, [0, 0.065, 0]);
+  part(tail, G.capsule(0.04, 0.1), fur, [0, 0.065, 0]);
   const tail2 = grp(tail, [0, 0.13, 0]);
-  part(tail2, G.capsule(0.028, 0.08), fur, [0, 0.05, 0]);
-  part(tail2, G.sphere(), light, [0, 0.11, 0], [0.034, 0.04, 0.034]);
+  part(tail2, G.capsule(0.032, 0.1), fur, [0, 0.06, 0]);
+  part(tail2, G.sphere(), light, [0, 0.135, 0], [0.038, 0.048, 0.038]);
 
-  // ── neck + head ──
+  // ── neck + head: a big round head, a long snout with a big wet nose, cheek puffs, floppy ears on springs ──
   const neck = grp(chest, [0, 0.12, 0.12], undefined, 'neck');
-  const neckMesh = part(neck, G.cyl(), fur, [0, 0.05, 0], [0.09, 0.12, 0.09]);
-  const head = grp(neck, [0, 0.13, 0.04], undefined, 'head');
+  const neckMesh = part(neck, G.cyl(), fur, [0, 0.05, 0], [0.095, 0.12, 0.095]);
+  const head = grp(neck, [0, 0.14, 0.04], undefined, 'head');
   head.rotation.order = 'YXZ';
-  const HR = 0.18;
-  part(head, G.sphere(), fur, undefined, [HR, HR * 0.95, HR]);
-  part(head, G.sphere(), fur, [0, -0.04, 0.17], [0.1, 0.085, 0.16]); // snout
-  part(head, G.sphere(), light, [0, -0.07, 0.2], [0.08, 0.05, 0.13], undefined, fo);
-  part(head, G.sphere(), black, [0, -0.01, 0.325], [0.045, 0.034, 0.03], undefined, fo); // nose
-  part(head, G.ball(), white, [0.014, 0.004, 0.348], 0.009, undefined, fo);
-  part(head, G.sphere(), dark, [0.07, 0.06, 0.13], [0.05, 0.045, 0.02], [0, 0.5, 0.3], fo); // eye patch
-  const teeth = part(head, G.capsule(0.01, 0.07), white, [0, -0.095, 0.23], 1, [0, 0, Math.PI / 2], fo);
-  const jaw = grp(head, [0, -0.09, 0.08]);
-  part(jaw, G.sphere(), light, [0, -0.005, 0.1], [0.07, 0.03, 0.12]);
-  const mouthIn = part(jaw, G.sphere(), mouthDark, [0, 0.014, 0.1], [0.06, 0.022, 0.1], undefined, fo);
-  const tongue = part(jaw, G.capsule(0.028, 0.06), tongueM, [0, 0.0, 0.2], [1, 1, 0.42], [Math.PI / 2 + 0.35, 0, 0], fo);
-  // floppy ears
+  const HR = 0.2;
+  const headSt = grp(head);
+  part(headSt, G.sphere(), fur, undefined, [HR, HR * 0.94, HR * 0.98]);
+  part(headSt, G.sphere(), fur, [0, -0.045, 0.17], [0.105, 0.09, 0.17]); // snout
+  part(headSt, G.sphere(), light, [0, -0.075, 0.2], [0.085, 0.055, 0.14], undefined, fo);
+  for (const sx of [1, -1]) part(headSt, G.sphere(), light, [sx * 0.05, -0.07, 0.27], [0.045, 0.04, 0.045], undefined, fo); // cheek puffs
+  part(headSt, G.sphere(), dark, [0, 0.13, 0.02], [0.08, 0.05, 0.1], [0.3, 0, 0], fo); // a spot on the crown
+  // the dog mouth line "ω" under the nose
+  part(headSt, cached('bublik-omega', () => merge([1, -1].map((sx) => ({ g: G.arc(0.022, 0.0045, Math.PI), p: [sx * 0.021, 0.0, 0] as [number, number, number], r: [0, 0, Math.PI] as [number, number, number] })))), black, [0, -0.048, 0.338], 1, [-0.35, 0, 0], fo);
+  part(headSt, G.capsule(0.004, 0.016), black, [0, -0.032, 0.343], 1, [-0.3, 0, 0], fo);
+  flatten(headSt, { cast: true });
+  // the big wet nose + its shine
+  const noseM = M.get('#2a1a1c');
+  const noseG = grp(head, [0, 0, 0.335]);
+  part(noseG, G.sphere(), noseM, undefined, [0.052, 0.04, 0.034], undefined, fo);
+  noOutline(part(noseG, G.ball(), white, [0.018, 0.016, 0.027], [0.014, 0.009, 0.006], [0, 0, -0.4], fo));
+  noOutline(part(noseG, G.ball(), white, [-0.016, 0.006, 0.03], 0.0045, undefined, fo));
+  const teeth = part(head, G.capsule(0.01, 0.07), white, [0, -0.1, 0.23], 1, [0, 0, Math.PI / 2], fo);
+  const jaw = grp(head, [0, -0.095, 0.08]);
+  part(jaw, G.sphere(), light, [0, -0.005, 0.1], [0.072, 0.032, 0.125]);
+  const mouthIn = part(jaw, G.sphere(), mouthDark, [0, 0.014, 0.1], [0.062, 0.022, 0.105], undefined, fo);
+  const tongue = part(jaw, G.capsule(0.03, 0.065), tongueM, [0, 0.0, 0.2], [1, 1, 0.42], [Math.PI / 2 + 0.35, 0, 0], fo);
+  // floppy ears (long, swinging on springs)
   const ears: THREE.Group[] = [];
+  const earSwing: THREE.Group[] = [];
   for (const s of [1, -1]) {
-    const ep = grp(head, [s * 0.13, 0.09, -0.02]);
+    const ep = grp(head, [s * 0.15, 0.1, -0.02]);
     ep.rotation.order = 'YXZ';
-    part(ep, G.sphere(), dark, [s * 0.03, -0.12, 0], [0.04, 0.15, 0.1]);
-    ears.push(ep);
+    const sw = grp(ep);
+    part(sw, G.sphere(), dark, [s * 0.03, -0.14, 0], [0.045, 0.17, 0.11]);
+    part(sw, G.sphere(), dark, [s * 0.034, -0.27, 0.0], [0.04, 0.05, 0.095]);
+    ears.push(ep); earSwing.push(sw);
   }
-  // eyes (every expression): oval + glint, ^^, —, > <, wide with whites, brows
-  interface DEye { oval: THREE.Mesh; glint: THREE.Mesh; sclera: THREE.Mesh; happy: THREE.Mesh; closed: THREE.Mesh; chev: THREE.Mesh; brow: THREE.Mesh; s: number }
-  const eyes: DEye[] = [];
-  for (const s of [1, -1]) {
-    const e = surf(head, s * 0.45, 0.17, HR * 0.97);
-    const sclera = part(e, G.ball(), white, [0, 0, 0.002], [0.04, 0.05, 0.016], undefined, fo);
-    const oval = part(e, G.ball(), black, [0, 0, 0.006], [0.033, 0.044, 0.018], undefined, fo);
-    const glint = part(e, G.ball(), white, [0.01, 0.016, 0.02], 0.01, undefined, fo);
-    const happy = part(e, G.arc(0.026, 0.008, Math.PI), black, [0, -0.01, 0.008], [1, 1, 0.6], undefined, fo);
-    const closed = part(e, G.capsule(0.008, 0.036), black, [0, -0.008, 0.01], 1, [0, 0, Math.PI / 2], fo);
-    const dir = s > 0 ? -1 : 1;
-    const chev = part(e, cached(`bublik-chev${dir}`, () => merge([
-      { g: G.capsule(0.0075, 0.026), p: [0, 0.01, 0], r: [0, 0, dir * -0.55 - Math.PI / 2] },
-      { g: G.capsule(0.0075, 0.026), p: [0, -0.01, 0], r: [0, 0, dir * 0.55 - Math.PI / 2] },
-    ])), black, [0, 0, 0.01], 1, undefined, fo);
-    const bg = surf(head, s * 0.43, 0.48, HR * 1.0);
-    const brow = part(bg, G.capsule(0.011, 0.04), dark, undefined, 1, [0, 0, Math.PI / 2], fo);
-    eyes.push({ oval, glint, sclera, happy, closed, chev, brow, s });
-  }
+  const earDangle = [new Dangle(), new Dangle()];
+  // eyes, lids, brows (the shared toon face; the right eye sits in a dark patch)
+  const face = buildToonFace(head, M, {
+    R: HR, eyeYaw: 0.42, eyePitch: 0.22, eyeW: 0.046, eyeH: 0.054, eyeD: 0.5,
+    iris: '#8a4a1e', irisDark: '#3a1a08', irisSize: 0.86, lidMat: fur, lidRest: 0,
+    lash: '#2a1410', brow: '#5a2a12', browThick: 0.012, browW: 0.034, browLift: 1.7, browOut: 1.02,
+    mouthPitch: -0.5, mouthW: 0.03, noMouth: true,
+  });
 
   // ── the trampoline balloon (puff) and the roll ball ──
   const balloon = part(bodyG, G.sphere(), fur, [0, 0, 0], 0.01);
@@ -189,7 +196,7 @@ export function createBublik(look: Partial<HeroLook> = DEFAULT_LOOKS.bublik): He
 
   // ───────────────────────── animation ─────────────────────────
   const C = P(), T = P();
-  const blinker = new Blinker();
+  const earRest = new THREE.Vector3(0, -0.2, 0);
   let t = Math.random() * 5, phase = 0, stT = 0, lastSt: HeroState = 'idle', first = true;
   let spinCur = 0, rollAng = 0, rollK = 0, puffK = 0, tumble = 0;
 
@@ -215,14 +222,18 @@ export function createBublik(look: Partial<HeroLook> = DEFAULT_LOOKS.bublik): He
     else phase += dt * 6;
     const s = Math.sin(phase), c = Math.cos(phase);
     const breathe = Math.sin(t * 2.6);
+    const sniff = st === 'idle' && a.talk < 0.05 ? Math.max(0, Math.sin(t * 0.55)) : 0;
 
     // ── target pose ──
     Object.assign(T, P());
     T.tail = 0.55; T.ears = 0.1;
     switch (st) {
       case 'idle':
-        T.bodyY = BODY_Y + 0.006 * breathe; T.headZ = 0.12 * Math.sin(t * 0.7); T.headX = 0.03 * breathe;
-        T.tongue = 0.6 + 0.2 * Math.max(0, Math.sin(t * 5)); T.jaw = 0.25;
+        // sniffing around (nose down, quick twitches), looking about, panting happily; licks his chops
+        T.bodyY = BODY_Y + 0.006 * breathe; T.headZ = 0.12 * Math.sin(t * 0.7); T.headX = 0.03 * breathe + 0.22 * Math.max(0, sniff - 0.4);
+        T.headY = 0.3 * Math.sin(t * 0.37);
+        T.tongue = 0.6 + 0.2 * Math.max(0, Math.sin(t * 5)); T.jaw = sniff > 0.55 ? 0.05 : 0.25;
+        if (a.talk > 0.05) { T.headZ = 0.15 * Math.sin(t * 2.2); T.headX = -0.1; T.ears = 0.35; T.fr = -0.25 * Math.max(0, Math.sin(t * 3)); }
         break;
       case 'walk': case 'sneak': {
         const sneak = st === 'sneak';
@@ -385,6 +396,7 @@ export function createBublik(look: Partial<HeroLook> = DEFAULT_LOOKS.bublik): He
     chestBall.scale.set(GIRTH * 1.03 * g, GIRTH * 1.03 * g, GIRTH * 1.06 * g);
     mid.scale.set(GIRTH * g, span, GIRTH * 0.97 * g); mid.position.y = span / 2;
     midBelly.scale.set(GIRTH * 0.78 * g, span, GIRTH * 0.72 * g); midBelly.position.y = span / 2; midBelly.position.z = 0.075 * g;
+    midSaddle.scale.set(GIRTH * 0.8 * g, span * 0.62 + 0.06, GIRTH * 0.75 * g); midSaddle.position.y = span / 2; midSaddle.position.z = -0.05 * g;
     chest.position.set(0, 0, span);
     // balloon over everything while puffed (the body parts sink inside it)
     vis(balloon, pk > 0.02);
@@ -415,11 +427,13 @@ export function createBublik(look: Partial<HeroLook> = DEFAULT_LOOKS.bublik): He
     neck.position.set(0, lerp(0.12, 0.3, pk), lerp(0.12, 0.26, pk));
     neckMesh.scale.y = 0.12;
     head.rotation.set(C.headX, C.headY, C.headZ);
-    // ears
+    // ears: the pose angle + a spring swing (they flop when he moves / shakes his head)
     for (let i = 0; i < 2; i++) {
       const sgn = i === 0 ? 1 : -1;
       const flap = Math.sin(t * 16 + i * 0.4) * clamp(C.ears - 1, 0, 1) * 0.4;
       ears[i].rotation.set(clamp(C.ears, -0.5, 1) * 0.3, 0, sgn * (0.12 + clamp(C.ears, -0.3, 2.4) * 0.9 + flap));
+      const o = earDangle[i].update(ears[i], earRest, dt, 70, 4, 3, 0.1);
+      earSwing[i].rotation.set(clamp(-(o.z - earRest.z) * 5, -0.7, 0.7), 0, clamp((o.x - earRest.x) * 5, -0.6, 0.6));
     }
     // trail
     vis(trail, trailOn);
@@ -436,22 +450,13 @@ export function createBublik(look: Partial<HeroLook> = DEFAULT_LOOKS.bublik): He
     if (ak && ex === 'normal') ex = 'angry';
     if (bridge > 0 && ex === 'normal') ex = 'angry';
     if (pk > 0.5 && ex === 'normal') ex = 'surprised';
-    const bl = blinker.update(dt);
     const wide = ex === 'scared' || ex === 'surprised';
-    const openE = ex === 'normal' || ex === 'angry' || wide;
-    for (const e of eyes) {
-      vis(e.oval, openE); vis(e.glint, openE); vis(e.sclera, wide);
-      vis(e.happy, ex === 'happy'); vis(e.closed, ex === 'sleepy'); vis(e.chev, ex === 'hurt');
-      if (openE) {
-        const k = 1 - bl * 0.92;
-        e.oval.scale.set(wide ? 0.022 : 0.033, (wide ? 0.03 : ex === 'angry' ? 0.034 : 0.044) * k, 0.018);
-        e.oval.position.set(0, ex === 'angry' ? -0.006 : 0, wide ? 0.01 : 0.006);
-      }
-      const browOn = ex === 'angry' || wide || ex === 'hurt';
-      vis(e.brow, browOn);
-      if (browOn) e.brow.rotation.set(0, 0, Math.PI / 2 + (ex === 'angry' ? 0.5 : -0.3) * e.s);
-    }
-    const open = Math.max(C.jaw * (ex === 'angry' ? 0.5 : 1), clamp(a.talk) * 0.9, wide ? 0.5 : 0);
+    face.update(dt, ex, 0, { browBias: st === 'idle' ? 0.25 * Math.max(0, Math.sin(t * 0.9)) : 0 });
+    const talkO = clamp(a.talk) * (0.65 + 0.35 * Math.sin(t * 11.3 + Math.sin(t * 4.1) * 2));
+    const open = Math.max(C.jaw * (ex === 'angry' ? 0.5 : 1), talkO * 0.95, wide ? 0.5 : 0);
+    // the sniff: the nose twitches
+    const sn = sniff > 0.55 ? Math.sin(t * 28) * 0.12 : 0;
+    noseG.scale.set(1 + sn * 0.6, 1 - sn, 1);
     jaw.rotation.x = open * 0.6;
     vis(mouthIn, open > 0.05);
     vis(tongue, (C.tongue > 0.3 || ex === 'happy') && ex !== 'angry' && open > 0.15);
@@ -466,6 +471,6 @@ export function createBublik(look: Partial<HeroLook> = DEFAULT_LOOKS.bublik): He
   return {
     root, update, weaponTip, setLook,
     get look() { return { ...cur }; },
-    dispose() { for (const m of M.all) m.dispose(); for (const m of [black, white, mouthDark, trailMat]) m.dispose(); },
+    dispose() { for (const m of M.all) m.dispose(); face.dispose(); for (const m of [black, white, mouthDark, trailMat]) m.dispose(); },
   };
 }

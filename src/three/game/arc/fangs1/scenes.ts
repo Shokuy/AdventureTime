@@ -10,7 +10,7 @@ import { vamp, ambient } from '../vampires';
 import { say, type Spk } from './speech';
 import { CAST, type Cast, type CastKind } from './cast';
 import { NightTown, TOWER, MARKS } from './town';
-import { Roofs, HALL, GALLERY } from './roofs';
+import { Roofs, HALL, ROOF_DOOR, GALLERY_MARKS } from './roofs';
 import { INTRO, INTRO_MEET, EXIT_TOWN, ROOFS_INTRO, BOSS_INTRO, DEFEAT, ENDING, TOAST, BARK, COUNT, TITLE, type Line } from './lines';
 
 /*
@@ -141,39 +141,60 @@ function* exitTown(L: Level3D): Script {
   yield L.shot(V(d.x + 2.5, 1.8, d.z + 7.0), V(d.x, 1.2, d.z + 2.6), 0.6);
   cast.look('pastila', cast.pos('tosha'));
   yield* lines(L, cast, EXIT_TOWN.slice(1));
-  // the door creaks, they go in
+  // in through the open doors, two by two, and up the stair into the dark (d: the porch's mouth)
+  T.door.set(true);
+  yield L.shot(V(d.x + 2.2, 1.7, d.z + 5.6), V(d.x, 1.3, d.z - 0.6), 0.6);
   ambient(L, () => audio.sfx('door', { pitch: 0.7 }));
-  yield all(cast.walk('tosha', d.x, d.z + 0.2, 2.4, 2), cast.walk('bublik', d.x + 0.4, d.z + 0.4, 2.4, 2), cast.walk('pastila', d.x - 0.3, d.z + 0.3, 2.4, 2), cast.walk('noki', d.x - 0.5, d.z + 0.5, 2.4, 2), wait(1.6));
+  yield all(cast.walk('tosha', d.x - 0.35, d.z + 0.9, 2.4, 2.5), cast.walk('bublik', d.x + 0.4, d.z + 1.1, 2.4, 2.5), cast.walk('pastila', d.x - 0.6, d.z + 2.0, 2.4, 2.5), cast.walk('noki', d.x + 0.7, d.z + 2.2, 2.4, 2.5));
+  yield all(cast.walk('tosha', d.x - 0.35, d.z - 1.05, 2.2, 2.5), cast.walk('bublik', d.x + 0.35, d.z - 0.95, 2.2, 2.5), cast.walk('pastila', d.x - 0.35, d.z + 0.9, 2.4, 2.5), cast.walk('noki', d.x + 0.4, d.z + 1.1, 2.4, 2.5));
+  // the last two follow; the camera climbs the tower with them (up there: the roofs)
+  cast.walk('tosha', d.x + 0.3, d.z - 1.25, 1.6, 2);
+  cast.walk('bublik', d.x - 0.3, d.z - 1.2, 1.6, 2);
+  yield all(L.shot(V(d.x + 2.4, 1.0, d.z + 6.8), V(d.x, 15.5, d.z - 4.3), 1.6), cast.walk('pastila', d.x - 0.35, d.z - 0.7, 2.2, 2.5), cast.walk('noki', d.x + 0.35, d.z - 0.6, 2.2, 2.5), wait(1.7));
   L.fadeFlash();
   cast.hideAll();
-  yield wait(0.4);
+  ambient(L, () => audio.sfx('door', { pitch: 0.55, volume: 0.6 }));
+  T.door.set(false);
+  yield wait(0.5);
   finish(L);
 }
 
 // ═════════════════════════════ fangs1_roofs ═════════════════════════════
 
-/** 5.4 fangs1_roofs_intro — out of the clock tower onto the roofs */
+/** 5.4 fangs1_roofs_intro — out of the clock tower onto the roofs (through the little door in the clock box) */
 function* roofsIntro(L: Level3D): Script {
   const R = roofs(L);
   if (!R) return;
-  const cast = R.cast, g = GALLERY;
+  const cast = R.cast, D = ROOF_DOOR, M = GALLERY_MARKS;
   L.cutscene(true);
-  const dir = Math.atan2(HALL.c.x - g.x, HALL.c.z - g.z);
-  const at = (a: number, r: number) => V(g.x + Math.sin(dir + a) * r, g.y, g.z + Math.cos(dir + a) * r);
-  const marks: Record<CastKind, THREE.Vector3> = { tosha: at(-0.18, 3.7), bublik: at(0.12, 3.75), pastila: at(0.42, 3.6), noki: at(-0.5, 3.6) };
-  for (const k of CAST) cast.place(k, marks[k].x, marks[k].y, marks[k].z, dir);
-  // over their shoulders: the sea of roofs, the dome far away, the Count on the weathervane
-  const behind = V(g.x + Math.sin(dir) * 2.9, g.y + 3.2, g.z + Math.cos(dir) * 2.9);
-  yield L.shot(behind, HALL.perch.clone(), 0);
-  yield wait(0.6);
-  yield all(L.shot(behind.clone().add(V(0, 0.4, 0)), HALL.c.clone().add(V(0, 3, 0)), 3.2), wait(1.2));
-  yield L.shot(at(0.12, 6.4).setY(g.y + 1.7), at(0.1, 3.4).setY(g.y + 1.1), 0.6);
+  cast.hideAll();
+  // the door in the clock box creaks open; one after another they step out onto the gallery
+  yield L.shot(V(8.8, 14.9, 4.4), V(3.3, 13.9, 0.5), 0);
+  ambient(L, () => audio.sfx('door', { pitch: 0.75 }));
+  yield tween(0.5, (k) => R.doorOpen(k), ease.outQuad);
+  const order: CastKind[] = ['noki', 'bublik', 'tosha', 'pastila'];
+  for (const k of order) {
+    cast.place(k, D.x + 0.28, 13, D.z, Math.PI / 2);
+    // (round the door's swung leaf: out first, then along the box to the mark)
+    const m = M[k];
+    L.runGen((function* (): Script { yield cast.walk(k, D.x + 0.75, D.z - 0.25, 2.4, 1); yield cast.walk(k, m.x, m.z, 2.4, 2); cast.look(k, V(12, 13, m.z * 0.4)); })());
+    yield wait(0.5);
+  }
+  yield wait(0.9);
+  // the sea of roofs from above the tower: the dome far away, the Count on its weathervane
+  const high = V(5.5, 25, 6.0);
+  yield L.shot(high, HALL.perch.clone(), 0.6);
+  for (const k of CAST) { const m = M[k]; cast.place(k, m.x, m.y, m.z, Math.PI / 2); }
+  yield all(L.shot(high.clone().add(V(0, 0.4, 0)), HALL.c.clone().add(V(0, 3, 0)), 3.2), wait(1.2));
+  // the four on the gallery, the bridge behind the camera
+  yield L.shot(V(8.7, 14.7, 0.0), V(3.7, 14.0, -0.05), 0.6);
   for (const k of CAST) cast.look(k, cast.pos('bublik'));
+  cast.look('bublik', V(9, 13, 0));
   yield* lines(L, cast, ROOFS_INTRO.slice(0, 2));
   cast.pose('noki', 'lookUp');
   yield* lines(L, cast, ROOFS_INTRO.slice(2));
   cast.pose('noki', null);
-  yield L.shot(behind, HALL.perch.clone(), 0.6);
+  yield L.shot(high, HALL.perch.clone(), 0.6);
   L.shout(BARK.countHere, 2.6);
   ambient(L, () => audio.sfx('batScreech', { pitch: 0.7, volume: 0.6 }));
   yield wait(1.6);

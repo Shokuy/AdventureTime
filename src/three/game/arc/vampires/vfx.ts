@@ -623,7 +623,7 @@ export class DeathPoof implements Actor3 {
   dead = false;
   private t = 0;
   private popped = false;
-  private anim = { st: 'stun', p: 0, speed: 0, flash: 1 };
+  private anim = { st: 'die', p: 0, speed: 0, flash: 1 };
   private dur: number;
   private baseScale: THREE.Vector3;
   private baseQ: THREE.Quaternion;

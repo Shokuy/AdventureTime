@@ -8,20 +8,26 @@ import { vamp, heroId, type VampKit, type VampLike, type Lantern } from './kit';
 import { markCharacter } from './greyShader';
 import { createFanger, createBat, createFlyer, createMistling, createServant, createBrute, createStars, spinStars, type VRig, type VAnim, type FolkKind } from './models';
 import { Invisibility } from './invis';
-import { GroundMark, ambient } from './fxUtil';
+import { ambient } from './fxUtil';
+import { TeleMark, QuakeFx, DeathPoof, puffs, type PoofStyle } from './vfx';
 import { LINES } from './lines';
 import { vampBane } from '../../heroes/bane';
 
 /**
  * The vampires of «Ночь клыков» (Enemy3 subclasses; host simulates, clients play the host's snapshots back):
- *   fanger  — Клыкарь: crouches (red spot ahead), lunges and bites: −1 ♥ and «пресный» (slow, grey) for a bit
- *   bat     — Нетопырь-разведчик: weak, flies in flocks; the first one to spot you screeches and calls everyone
- *   flyer   — Летучий клыкарь: circles high, marks a spot on the ground, dives at it, lies dazed after (hit it!)
+ *   fanger  — Клыкарь: crouches (cape spread, a red lane ahead), lunges and bites: −1 ♥ and «пресный» for a bit
+ *   bat     — Нетопырь-разведчик: weak, flies in flocks; the first one to spot you screeches and calls everyone.
+ *             Flies like a bat: acceleration-limited steering, banked circles over you, then wind-up (rears back,
+ *             wings spread) → accelerating dive → swoop out and climb back → cooldown
+ *   flyer   — Летучий клыкарь: circles high, marks a spot on the ground, rears back, dives at it, lies dazed after
  *   mist    — Туманник: turns to mist (can't be hit), drifts behind you, forms again (ring) and claws
  *   servant — Невидимка-слуга: invisible; shows in light, dust, when hit or by Ноки's chord; shimmers before a slap
- *   brute   — Упырь-громила: big and slow; raises his fists (red ring), slams: shockwave to jump over, lanterns go out
+ *   brute   — Упырь-громила: big and slow; raises his fists (a filling red disc), slams: a shockwave to jump over,
+ *             lanterns go out
  * Every vampire: keeps out of the light of «солнышки» (waits at the edge), burns and flees when caught in it, takes ×2
- * damage there; 'chord' hits stun + reveal; HP grows with the party (L.enemy).
+ * damage there; 'chord' hits stun + reveal; HP grows with the party (L.enemy). A beaten one pops into smoke (the rig
+ * squashes and poofs: vfx.DeathPoof) and little bats fly off to the castle.
+ * Visual effects (telegraphs, mist, the slam's wave, trails) are drawn on every machine from the replicated act/pr.
  */
 
 declare module '../../enemies' {
@@ -40,12 +46,15 @@ declare module '../../enemies' {
 
 const v = new THREE.Vector3();
 const v2 = new THREE.Vector3();
+const v3 = new THREE.Vector3();
+const UP = new THREE.Vector3(0, 1, 0);
 const TAU = Math.PI * 2;
+const wrapA = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
 
 export abstract class Vamp3 extends Enemy3 implements VampLike {
   readonly vampire = true as const;
   rig: VRig;
-  anim: VAnim = { st: 'idle', p: 0, speed: 0, flash: 0 };
+  anim: VAnim = { st: 'idle', p: 0, speed: 0, flash: 0, bank: 0, pitch: 0 };
   /** current action and its timer (progress `pr` 0..1 travels to clients) */
   act = 'idle'; at = 0; atMax = 1; pr = 0;
   cd = rand(0.6, 1.6);
@@ -58,7 +67,7 @@ export abstract class Vamp3 extends Enemy3 implements VampLike {
   burns = true;
   stars = createStars();
   invis: Invisibility | null = null;
-  protected marks: GroundMark[] = [];
+  protected marks: { dispose(): void }[] = [];
   protected abstract readonly ACTS: readonly string[];
   protected senseT = rand(0, 0.2);
   protected wanderT = rand(1, 3);
@@ -66,6 +75,10 @@ export abstract class Vamp3 extends Enemy3 implements VampLike {
   protected barkCD = rand(1, 3);
   /** client: replicated invisibility */
   protected netVis = 1;
+  /** every machine: the act seen last frame (visual edges: a slam lands, a dive starts) */
+  protected seenAct = '';
+  private lastYaw = NaN;
+  private bankK = 0;
   constructor(kind: Enemy3['kind'], pos: THREE.Vector3, r: number, h: number, rig: VRig, o: EnemyOpts) {
     super(kind, pos, r, h);
     this.rig = rig;
@@ -129,6 +142,55 @@ export abstract class Vamp3 extends Enemy3 implements VampLike {
     b.vel.z = approach(b.vel.z, dz * speed, acc);
     if (face && speed > 0.1) this.faceToward(b.pos.x + dx, b.pos.z + dz, dt, 9);
     return d;
+  }
+
+  // ───────── flight (bats, flyers) ─────────
+  /**
+   * Acceleration-limited flight toward a desired velocity (the body keeps its momentum: no snapping, no sliding):
+   * separation from other flyers, a floor clearance, light avoidance; faces where it flies when `face`.
+   */
+  protected fly(L: Level3D, K: VampKit, want: THREE.Vector3, acc: number, dt: number, face = true, clear = 0.9) {
+    const b = this.body;
+    // keep apart from other flyers (a soft push, mostly sideways)
+    for (const e of L.enemies) {
+      if (e === this || e.dead || !e.flying) continue;
+      const ox = b.pos.x - e.body.pos.x, oy = b.pos.y - e.body.pos.y, oz = b.pos.z - e.body.pos.z;
+      const od = Math.hypot(ox, oy, oz), min = b.r + e.body.r + 0.6;
+      if (od < min && od > 0.01) { const k = ((min - od) / min) * 4; want.x += (ox / od) * k; want.y += (oy / od) * k * 0.5; want.z += (oz / od) * k; }
+    }
+    // floor clearance
+    const gy = L.phys.groundAt(b.pos.x, b.pos.z, b.pos.y + 0.3, 0.2);
+    if (gy > -1e8 && b.pos.y - gy < clear) want.y = Math.max(want.y, (clear - (b.pos.y - gy)) * 6);
+    // don't fly into a sunbeam (unless fleeing it)
+    if (this.burns && this.act !== 'burn' && this.sun < 0.3) {
+      const hs = Math.hypot(want.x, want.z);
+      if (hs > 0.5) {
+        v3.set(b.pos.x + (want.x / hs) * 1.4, b.pos.y, b.pos.z + (want.z / hs) * 1.4);
+        if (K.sunAt(v3) > 0.25) { want.x *= -0.3; want.z *= -0.3; want.y = Math.max(want.y, 1.5); }
+      }
+    }
+    const dx = want.x - b.vel.x, dy = want.y - b.vel.y, dz = want.z - b.vel.z;
+    const dl = Math.hypot(dx, dy, dz), mx = acc * dt;
+    const k = dl > mx ? mx / dl : 1;
+    b.vel.x += dx * k; b.vel.y += dy * k; b.vel.z += dz * k;
+    if (face) this.faceVel(dt, 7);
+  }
+  /** turn toward the direction of flight (rate-limited, so turns read as arcs) */
+  protected faceVel(dt: number, rate = 7) {
+    const b = this.body;
+    if (Math.hypot(b.vel.x, b.vel.z) > 0.6) this.faceToward(b.pos.x + b.vel.x, b.pos.z + b.vel.z, dt, rate);
+  }
+  /** desired velocity that circles (cx, cz) at radius R (dir ±1), correcting radius smoothly; y toward gy */
+  protected circleVel(out: THREE.Vector3, cx: number, cz: number, R: number, speed: number, dir: number, gy: number) {
+    const b = this.body;
+    let rx = b.pos.x - cx, rz = b.pos.z - cz;
+    let r = Math.hypot(rx, rz);
+    if (r < 0.05) { rx = Math.sin(this.yaw); rz = Math.cos(this.yaw); r = 1; }
+    rx /= r; rz /= r;
+    const err = clamp((R - r) * 1.2, -1.2, 1.2);
+    out.set(-rz * dir + rx * err, 0, rx * dir + rz * err).normalize().multiplyScalar(speed);
+    out.y = clamp((gy - b.pos.y) * 2, -3.5, 3.5);
+    return out;
   }
 
   // ───────── kit hooks ─────────
@@ -270,12 +332,21 @@ export abstract class Vamp3 extends Enemy3 implements VampLike {
       ambient(L, () => L.fx.soft.emit(c.clone().setY(c.y + 0.2), { count: 1, speed: [0.6, 1.4], dir: new THREE.Vector3(0, 1, 0), spread: 0.4, life: [0.5, 0.9], size: [0.18, 0.32], size2: 2.2, colors: ['#4a4458', '#7a7488', '#ffb060'], g: -2, drag: 2, jitter: 0.25 }));
     }
     this.visuals(L, dt);
+    this.seenAct = this.act;
   }
   protected visuals(_L: Level3D, _dt: number) { /* subclasses: telegraph marks, mist… */ }
   protected pose(): string { return this.act === 'idle' || this.act === 'home' || this.act === 'walk' ? (Math.hypot(this.body.vel.x, this.body.vel.z) > 0.3 ? 'walk' : 'idle') : this.act; }
   syncRig(dt: number) {
     const a = this.anim;
     a.st = this.pose(); a.p = this.pr; a.speed = Math.hypot(this.body.vel.x, this.body.vel.z); a.flash = this.flash;
+    if (this.flying) {
+      // bank into turns (yaw rate × speed) and pitch with the climb / dive — from what every machine sees
+      const yr = Number.isNaN(this.lastYaw) || dt <= 0 ? 0 : wrapA(this.yaw - this.lastYaw) / dt;
+      this.bankK += (clamp(yr * 0.32 * Math.min(1, a.speed / 3), -1, 1) - this.bankK) * Math.min(1, dt * 8);
+      a.bank = this.bankK;
+      a.pitch = Math.atan2(-this.body.vel.y, Math.max(1.5, a.speed));
+    }
+    this.lastYaw = this.yaw;
     this.rig.update(dt, a);
   }
   protected cleanup() { for (const m of this.marks) m.dispose(); this.marks = []; }
@@ -288,8 +359,24 @@ export abstract class Vamp3 extends Enemy3 implements VampLike {
     }
     super.netEvent(L, ev);
   }
-  /** a defeated vampire shrinks into a little bat and flies off to the castle (no blood: smoke, stars, a squeak) */
+  /** how this vampire pops when beaten (null: the old generic smoke + one bat) */
+  protected poof(): PoofStyle | null { return null; }
+  /** a defeated vampire pops into smoke and little bats fly off to the castle (no blood: smoke, stars, a squeak) */
   deathFx(L: Level3D, c: THREE.Vector3) {
+    const st = this.poof();
+    if (st && this.rig.root.parent) {
+      // the rig plays its last moment where it stood (the enemy itself is gone this tick)
+      const holder = new THREE.Group();
+      this.root.updateMatrixWorld(true);
+      this.root.matrixWorld.decompose(holder.position, holder.quaternion, holder.scale);
+      holder.add(this.rig.root);
+      this.stars.visible = false;
+      audio.sfx('batScreech', { pitch: 1.8, volume: 0.35 });
+      L.actors.push(new DeathPoof(L, this.rig, holder, st, (at) => {
+        for (let i = 0; i < st.bats; i++) L.actors.push(new MouseAway(L, at, i, st.bats));
+      }));
+      return;
+    }
     ambient(L, () => {
       L.fx.emit(c, { count: 26, speed: [1, 4], dir: new THREE.Vector3(0, 1, 0), spread: 0.9, life: [0.5, 1.1], size: [0.2, 0.42], size2: 1.8, colors: ['#4a3a66', '#2b2140', '#8a7ab0'], g: -1, drag: 2 });
       L.fx.stars(c, 10, ['#ffe14a', '#ffffff']);
@@ -297,7 +384,13 @@ export abstract class Vamp3 extends Enemy3 implements VampLike {
     });
     L.actors.push(new MouseAway(L, c));
   }
-  onHurt(L: Level3D) { L.fx.emit(this.center(), { count: 8, speed: [1.5, 3.5], life: [0.3, 0.6], size: [0.1, 0.18], colors: ['#8a7ab0', '#c4b2e6'], g: 6 }); }
+  /** host (captured for friends): a hit — sparks, a pink flash ring, puffs of the vampire's colour */
+  onHurt(L: Level3D) {
+    const c = this.center();
+    L.fx.emit(c, { count: 8, speed: [1.5, 3.5], life: [0.3, 0.6], size: [0.1, 0.18], colors: ['#8a7ab0', '#c4b2e6'], g: 6 });
+    L.fx.glow.emit(c, { count: 7, speed: [3, 7], life: [0.12, 0.28], size: [0.12, 0.24], colors: ['#ffffff', '#ffb0d0', '#ffe14a'], drag: 6 });
+    L.fx.ring(c, 0.7 + this.body.r, '#ffd0e8', 0.16, false);
+  }
 }
 
 /** «Побеждённые вампиры сжимаются в мышат и улетают в замок» — a local effect on every machine */
@@ -307,21 +400,27 @@ class MouseAway implements Actor3 {
   private rig = createBat();
   private root = new THREE.Group();
   private vel: THREE.Vector3;
-  private anim: VAnim = { st: 'fly', p: 0, speed: 0, flash: 0 };
-  constructor(L: Level3D, at: THREE.Vector3) {
+  private anim: VAnim = { st: 'fly', p: 0, speed: 4, flash: 0, bank: 0, pitch: -0.3 };
+  private wob = rand(0, TAU);
+  constructor(L: Level3D, at: THREE.Vector3, i = 0, n = 1) {
     this.root.add(this.rig.root);
     this.root.position.copy(at);
     this.root.scale.setScalar(0.01);
-    const a = rand(0, TAU);
-    this.vel = new THREE.Vector3(Math.cos(a) * 2.5, 2.2, Math.sin(a) * 2.5);
+    const a = n > 1 ? (i / n) * TAU + rand(-0.3, 0.3) : rand(0, TAU);
+    this.vel = new THREE.Vector3(Math.cos(a) * 2.5, 2.2 + rand(0, 0.8), Math.sin(a) * 2.5);
+    this.t = -i * 0.06;
     L.scene.add(this.root);
   }
   update(_L: Level3D, dt: number) {
     this.t += dt;
-    this.vel.y += dt * 1.5;
+    // a fluttery climb (accelerating up and away, weaving)
+    this.vel.y += dt * 1.8;
+    this.vel.x += Math.cos(this.t * 7 + this.wob) * dt * 3;
+    this.vel.z += Math.sin(this.t * 6 + this.wob) * dt * 3;
     this.root.position.addScaledVector(this.vel, dt);
     this.root.rotation.y = Math.atan2(this.vel.x, this.vel.z);
-    const s = Math.min(1, this.t * 4) * (this.t > 2 ? Math.max(0.01, 1 - (this.t - 2) * 2) : 1) * 0.6;
+    this.anim.bank = Math.sin(this.t * 7 + this.wob) * 0.6;
+    const s = Math.min(1, Math.max(0, this.t) * 5) * (this.t > 2 ? Math.max(0.01, 1 - (this.t - 2) * 2) : 1) * 0.6;
     this.root.scale.setScalar(Math.max(0.01, s));
     this.rig.update(dt, this.anim);
     if (this.t > 2.5) { this.dead = true; this.root.removeFromParent(); }
@@ -333,7 +432,7 @@ export class Fanger3 extends Vamp3 {
   protected readonly ACTS = ['idle', 'walk', 'crouch', 'lunge', 'recover', 'hiss', 'stun', 'burn', 'home'] as const;
   private dir = new THREE.Vector3(0, 0, 1);
   private bitten = false;
-  private mark = new GroundMark('#ff3040', false);
+  private mark = new TeleMark('#ff3040', 'lane');
   constructor(pos: THREE.Vector3, o: EnemyOpts = {}) {
     super('fanger', pos, 0.36, 1.0, createFanger(), o);
     this.hp = this.maxHp = 3; this.loot = 2;
@@ -387,23 +486,41 @@ export class Fanger3 extends Vamp3 {
   }
   protected onSpot(L: Level3D, t: HeroLike, loud = true) { super.onSpot(L, t, loud); if (loud) this.bark(L, LINES.fangerSpot, 0.5); }
   protected dmgMul() { return this.act === 'recover' ? 1.5 : 1; }
-  protected visuals(L: Level3D) {
-    if (this.act === 'crouch') {
-      const fx = Math.sin(this.yaw), fz = Math.cos(this.yaw);
-      const b = this.body;
-      this.mark.show(L, b.pos.x + fx * 2.1, b.pos.y, b.pos.z + fz * 2.1, 0.9, 0.25 + 0.5 * this.pr);
-    } else this.mark.hide();
+  protected poof(): PoofStyle { return { smoke: ['#4a3a66', '#2b2140', '#6a5490'], ash: ['#ff4a5a', '#ffb0c0', '#ffe14a'], bats: 2, size: 1, kind: 'pop' }; }
+  protected visuals(L: Level3D, dt: number) {
+    const b = this.body;
+    if (this.act === 'crouch') this.mark.show(L, b.pos.x, b.pos.y, b.pos.z, 0.5, this.pr, 0.5 + 0.5 * this.pr, dt, 2.7, this.yaw);
+    else if (this.act === 'lunge') this.mark.show(L, b.pos.x, b.pos.y, b.pos.z, 0.5, 1, Math.max(0, 1 - this.pr * 1.5), dt, 2.7, this.yaw);
+    else this.mark.hide();
+    // pounce: a kick of dust, then a smoky streak behind the cape
+    if (this.act === 'lunge' && this.seenAct !== 'lunge') puffs(L, v.copy(b.pos).setY(b.pos.y + 0.1), { count: 8, speed: [1, 2.5], spread: 1, flat: 0.8, life: [0.4, 0.7], size: [0.25, 0.4], grow: 2, colors: ['#a898c0', '#8a7c9e'], alpha: 0.6, drag: 3, jitter: 0.2, tiles: [0, 2] });
+    if (this.act === 'lunge' && Math.random() < 0.8) puffs(L, this.center(v).setY(b.pos.y + 0.55), { count: 1, speed: [0.1, 0.4], life: [0.3, 0.5], size: [0.3, 0.45], grow: 1.6, colors: ['#3a2d58', '#2b2140', '#5a4880'], alpha: 0.55, g: -0.2, tiles: [1, 3] });
+    // the crouch: a shiver of red sparks in the eyes (and claws)
+    if (this.act === 'crouch' && this.pr > 0.55 && Math.random() < 0.35) ambient(L, () => L.fx.glow.emit(this.center(v).setY(b.pos.y + 0.8), { count: 1, speed: [0.3, 1], life: [0.2, 0.4], size: [0.06, 0.1], colors: ['#ff3040', '#ff8090'], g: -1, jitter: 0.25 }));
   }
 }
 
 // ═════════════════════════════ НЕТОПЫРЬ ═════════════════════════════
+/**
+ * Flight: the bat keeps its momentum — every phase only changes the velocity it wants and how hard it may accelerate
+ * (fly()), and it always faces where it flies (except while hovering to screech / aim), banking into turns.
+ *   fly (patrol: wide banked circles around home, now and then reversing in an S-turn) → spots you → screech (hover,
+ *   wings flared; the first one calls the flock) → orbit (banked circles above you) → prep (wind-up: brakes, rears
+ *   back, wings spread, eyes flare) → dive (accelerates from its speed up to 13 m/s, homing only at the start) →
+ *   swoop (pulls up, keeps its momentum, climbs back) → orbit with a cooldown.
+ * (The old orbit set the velocity straight from a point that ran round the hero and faced the hero meanwhile: the bat
+ * moved sideways — "sliding" — and snapped between phases with no acceleration.)
+ */
 export class Bat3 extends Vamp3 {
-  protected readonly ACTS = ['fly', 'screech', 'orbit', 'prep', 'dive', 'stun', 'burn', 'home', 'idle'] as const;
+  protected readonly ACTS = ['fly', 'screech', 'orbit', 'prep', 'dive', 'stun', 'burn', 'home', 'idle', 'swoop'] as const;
   private dir = new THREE.Vector3();
-  private orbitA = rand(0, TAU);
   private orbitDir = Math.random() < 0.5 ? 1 : -1;
+  private patrolDir = Math.random() < 0.5 ? 1 : -1;
+  private patrolT = rand(4, 8);
   private hit = false;
   private flapT = rand(0, 1);
+  private diveV = 0;
+  private want = new THREE.Vector3();
   constructor(pos: THREE.Vector3, o: EnemyOpts = {}) {
     super('bat', pos, 0.28, 0.4, createBat(), { aggro: 12, ...o });
     this.hp = this.maxHp = 1; this.loot = 1;
@@ -419,61 +536,104 @@ export class Bat3 extends Vamp3 {
     else this.go('orbit', rand(0.6, 1.4));
   }
   protected brain(L: Level3D, K: VampKit, dt: number) {
-    const b = this.body, t = this.target;
+    const b = this.body, t = this.target, w = this.want;
     if ((this.flapT -= dt) <= 0) { this.flapT = rand(0.9, 1.6); if (t) audio.sfx('batFlap', { volume: 0.25, pitch: rand(0.9, 1.3) }); }
     if (this.act === 'dive') {
-      b.vel.copy(this.dir).multiplyScalar(10.5);
+      // accelerate along the dive line; steer a little toward him only in its first part (readable, dodgeable)
+      this.diveV = Math.min(13, this.diveV + 34 * dt);
+      if (t && this.pr < 0.25) {
+        v.copy(t.center(v2)).sub(this.center(v3)).normalize();
+        const ang = this.dir.angleTo(v);
+        if (ang > 1e-3) this.dir.lerp(v, Math.min(1, (1.6 * dt) / ang)).normalize();
+      }
+      b.vel.copy(this.dir).multiplyScalar(this.diveV);
+      this.faceToward(b.pos.x + this.dir.x, b.pos.z + this.dir.z, dt, 14);
       if (!this.hit) for (const h of L.alivePlayers()) {
         if (h.center(v2).distanceTo(this.center(v)) < 0.62) { this.hit = true; h.hurt(L, 1, b.pos.clone()); break; }
       }
-      if (this.at <= 0 || b.hitWall || b.onGround || this.hit) { this.go('orbit', rand(1.2, 2.2)); b.vel.multiplyScalar(0.3); }
+      const gy = L.phys.groundAt(b.pos.x, b.pos.z, b.pos.y + 0.3, 0.2);
+      const low = gy > -1e8 && b.pos.y - gy < 0.45 && this.dir.y < 0;
+      const passed = t ? this.dir.dot(v.copy(t.center(v2)).sub(this.center(v3))) < -0.4 : true;
+      if (this.at <= 0 || b.hitWall || b.onGround || this.hit || low || passed) {
+        this.go('swoop', 0.9);
+        if (b.onGround || low) b.vel.y = Math.max(b.vel.y, 1.5);
+        audio.sfx('whoosh', { volume: 0.2, pitch: 2 });
+      }
+      return;
+    }
+    if (this.act === 'swoop') {
+      // pull out of the dive: keep the horizontal momentum, climb back over him
+      const hs = Math.hypot(b.vel.x, b.vel.z);
+      const fx = hs > 0.3 ? b.vel.x / hs : Math.sin(this.yaw), fz = hs > 0.3 ? b.vel.z / hs : Math.cos(this.yaw);
+      const sp = Math.max(4.5, hs * 0.92);
+      const ty = t ? t.center(v2).y + 2.1 : this.home.y;
+      w.set(fx * sp, clamp((ty - b.pos.y) * 3 + 1.5, 1, 5.5), fz * sp);
+      this.fly(L, K, w, 22, dt, true, 0.6);
+      if (this.at <= 0 || (this.pr > 0.4 && b.pos.y > ty - 0.3)) this.go(t ? 'orbit' : 'fly', rand(1.1, 2));
       return;
     }
     if (!t) {
+      // patrol: wide banked circles around home, now and then reversing (an S-turn)
       if (this.act !== 'fly' && this.act !== 'home') this.go('fly');
-      const gx = this.home.x + Math.sin(this.t * 0.9) * 1.6, gz = this.home.z + Math.cos(this.t * 0.7) * 1.6, gy = this.home.y + Math.sin(this.t * 2.3) * 0.4;
-      b.vel.set((gx - b.pos.x) * 2, (gy - b.pos.y) * 2, (gz - b.pos.z) * 2);
-      this.faceToward(gx + Math.cos(this.t), gz - Math.sin(this.t), dt, 4);
+      if ((this.patrolT -= dt) <= 0) { this.patrolT = rand(5, 9); this.patrolDir *= -1; }
+      const gy = this.home.y + Math.sin(this.t * 0.9) * 0.45;
+      this.circleVel(w, this.home.x, this.home.z, 2.4, 3.1, this.patrolDir, gy);
+      this.fly(L, K, w, 7, dt);
       return;
     }
     const tc = t.center(v2);
     if (this.act === 'screech') {
-      this.halt(dt, 10); this.faceToward(tc.x, tc.z, dt, 10);
+      // hover in place, flared, glaring at him
+      w.set(0, (tc.y + 2 - b.pos.y) * 1.5, 0);
+      this.fly(L, K, w, 9, dt, false);
+      this.faceToward(tc.x, tc.z, dt, 10);
       if (this.at <= 0) { K.alarm(b.pos, 18, t); this.go('orbit', rand(0.8, 1.6)); }
       return;
     }
     if (this.act === 'prep') {
-      this.halt(dt, 16); this.faceToward(tc.x, tc.z, dt, 12);
+      // wind-up: brake, rear back and up a little, face him
+      v.set(b.pos.x - tc.x, 0, b.pos.z - tc.z).normalize();
+      w.set(v.x * 1.4, 1.2, v.z * 1.4);
+      this.fly(L, K, w, 16, dt, false);
+      this.faceToward(tc.x, tc.z, dt, 14);
       if (this.at <= 0) {
-        this.dir.copy(tc).addScaledVector(t.vel, 0.15).sub(this.center(v)).normalize();
+        this.dir.copy(tc).addScaledVector(t.vel, 0.18).sub(this.center(v)).normalize();
+        this.diveV = Math.max(2.5, b.vel.dot(this.dir));
         this.go('dive', 0.7); this.hit = false;
         audio.sfx('whoosh', { volume: 0.35, pitch: 1.6 });
       }
       return;
     }
-    // orbit above him; dive when it's my turn (one bat per hero at a time) and he's out of the light
+    // orbit above him (banked circles); dive when it's my turn (one bat per hero at a time) and he's out of the light
     if (this.act !== 'orbit') this.go('orbit', rand(0.8, 1.6));
     const lit = K.sunAt(t.pos) > 0.3;
-    this.orbitA += dt * 1.7 * this.orbitDir;
     const R = lit ? 6.5 : 3.4;
-    const gx = tc.x + Math.cos(this.orbitA) * R, gz = tc.z + Math.sin(this.orbitA) * R, gy = tc.y + 2.1 + Math.sin(this.t * 3) * 0.35;
-    b.vel.set(clamp((gx - b.pos.x) * 3, -8, 8), clamp((gy - b.pos.y) * 3, -6, 6), clamp((gz - b.pos.z) * 3, -8, 8));
-    this.faceToward(tc.x, tc.z, dt, 8);
+    const gy = tc.y + 2.1 + Math.sin(this.t * 2.2) * 0.35;
+    this.circleVel(w, tc.x, tc.z, R, 5.2, this.orbitDir, gy);
+    // match his movement so the circle travels with him
+    w.x += t.vel.x * 0.8; w.z += t.vel.z * 0.8;
+    this.fly(L, K, w, 12, dt);
+    if (b.hitWall) this.orbitDir *= -1;
     const key = 'batDive:' + heroId(t);
     const last = (L.refs[key] as number | undefined) ?? -99;
-    if (!lit && this.at <= 0 && L.t - last > 0.65 && this.los(L, t)) {
+    if (!lit && this.at <= 0 && L.t - last > 0.65 && Math.hypot(b.pos.x - tc.x, b.pos.z - tc.z) < R + 1.5 && this.los(L, t)) {
       L.refs[key] = L.t;
-      this.go('prep', 0.38);
+      this.go('prep', 0.45);
+      audio.sfx('batScreech', { volume: 0.18, pitch: 2.2 });
     }
   }
   protected burn(L: Level3D, K: VampKit, dt: number) {
     if (this.act !== 'burn') { this.go('burn', 0); audio.sfx('batScreech', { pitch: 1.4, volume: 0.5 }); }
     const away = K.sunAway(this.body.pos, v2);
-    const b = this.body;
-    if (away) b.vel.set(away.x * 5, 2, away.z * 5); else this.halt(dt);
+    if (away) { this.want.set(away.x * 6, 2, away.z * 6); this.fly(L, K, this.want, 16, dt); } else this.halt(dt, 8);
   }
   protected pose() { return this.act === 'home' || this.act === 'idle' ? 'fly' : this.act; }
   protected dmgMul() { return 1; }
+  protected poof(): PoofStyle { return { smoke: ['#4a3a66', '#6a5490', '#2b2140'], ash: ['#ffe14a', '#ffb0c0'], bats: 0, size: 0.55, kind: 'pop' }; }
+  protected visuals(L: Level3D) {
+    // a whoosh trail while diving
+    if (this.act === 'dive' && Math.random() < 0.7) puffs(L, this.center(v), { count: 1, speed: [0, 0.2], life: [0.2, 0.35], size: [0.18, 0.28], grow: 1.4, colors: ['#5a4880', '#3b2b52'], alpha: 0.45, g: 0, tiles: [1, 3] });
+  }
 }
 
 // ═════════════════════════════ ЛЕТУЧИЙ КЛЫКАРЬ ═════════════════════════════
@@ -481,9 +641,11 @@ export class Flyer3 extends Vamp3 {
   protected readonly ACTS = ['fly', 'stalk', 'aim', 'dive', 'ground', 'rise', 'stun', 'burn', 'home', 'idle'] as const;
   private spot = new THREE.Vector3();
   private dir = new THREE.Vector3();
-  private orbitA = rand(0, TAU);
   private hit = false;
-  private mark = new GroundMark('#ff3040', true);
+  private diveV = 0;
+  private circDir = Math.random() < 0.5 ? 1 : -1;
+  private want = new THREE.Vector3();
+  private mark = new TeleMark('#ff3040', 'target');
   constructor(pos: THREE.Vector3, o: EnemyOpts = {}) {
     super('flyer', pos, 0.42, 0.95, createFlyer(), { aggro: 16, ...o });
     this.hp = this.maxHp = 4; this.loot = 3;
@@ -496,54 +658,64 @@ export class Flyer3 extends Vamp3 {
     return (gy > -1e8 ? Math.max(gy, base - 2) : base) + 3.6;
   }
   protected brain(L: Level3D, K: VampKit, dt: number) {
-    const b = this.body, t = this.target;
+    const b = this.body, t = this.target, w = this.want;
     switch (this.act) {
       case 'aim':
-        this.halt(dt, 12); this.faceToward(this.spot.x, this.spot.z, dt, 10);
+        // wind-up: brake into a hover, rear back and up, glare at the spot
+        v.set(b.pos.x - this.spot.x, 0, b.pos.z - this.spot.z).normalize();
+        w.set(v.x * 1.2, 1.0, v.z * 1.2);
+        this.fly(L, K, w, 12, dt, false);
+        this.faceToward(this.spot.x, this.spot.z, dt, 10);
         if (this.at <= 0) {
           this.dir.copy(this.spot).setY(this.spot.y + 0.4).sub(this.center(v)).normalize();
+          this.diveV = Math.max(3, b.vel.dot(this.dir));
           this.go('dive', 1.1); this.hit = false;
           audio.sfx('whoosh', { pitch: 0.9, volume: 0.6 });
         }
         return;
       case 'dive': {
-        b.vel.copy(this.dir).multiplyScalar(15);
+        this.diveV = Math.min(16, this.diveV + 42 * dt);
+        b.vel.copy(this.dir).multiplyScalar(this.diveV);
+        this.faceToward(b.pos.x + this.dir.x, b.pos.z + this.dir.z, dt, 14);
         if (!this.hit) for (const h of L.alivePlayers()) {
           if (h.center(v2).distanceTo(this.center(v)) < 1.0) { this.hit = true; if (h.hurt(L, 1, b.pos.clone(), new THREE.Vector3(this.dir.x * 8, 6, this.dir.z * 8))) { K.bland(h, 2); audio.sfx('bite'); } break; }
         }
         const reached = Math.hypot(this.spot.x - b.pos.x, this.spot.z - b.pos.z) < 0.6 && b.pos.y < this.spot.y + 1;
         if (this.at <= 0 || b.hitWall || b.onGround || reached) {
-          this.go('ground', 1.4); b.gravity = 32; b.vel.set(0, 0, 0);
+          this.go('ground', 1.4); b.gravity = 32; b.vel.set(this.dir.x * 2, 0, this.dir.z * 2);
           L.tcam.shake(0.15); audio.sfx('thud', { volume: 0.6 });
           L.fx.dust(b.pos.clone(), 10, '#b8a8d0');
         }
         return;
       }
       case 'ground':
-        this.halt(dt, 20);
-        if (this.at <= 0) { this.go('rise', 0.7); b.gravity = 0; b.vel.y = 4.5; }
+        this.halt(dt, 10);
+        if (this.at <= 0) { this.go('rise', 0.7); b.gravity = 0; b.vel.y = 2.5; }
         return;
       case 'rise':
-        b.vel.y = approach(b.vel.y, 3, 10 * dt);
+        // big flaps: accelerate up, bleed off the drift
+        w.set(0, 3.4, 0);
+        this.fly(L, K, w, 9, dt, false, 0);
         if (this.at <= 0) { this.go(t ? 'stalk' : 'fly'); this.cd = rand(1.5, 2.6) * this.cdMul(L); }
         return;
     }
     if (!t) {
       if (this.act !== 'fly' && this.act !== 'home') this.go('fly');
-      const gx = this.home.x + Math.sin(this.t * 0.5) * 3, gz = this.home.z + Math.cos(this.t * 0.4) * 3;
-      const gy = this.home.y + Math.sin(this.t * 1.7) * 0.4;
-      b.vel.set((gx - b.pos.x) * 1.5, (gy - b.pos.y) * 2, (gz - b.pos.z) * 1.5);
-      this.faceToward(gx + Math.cos(this.t * 0.5), gz - Math.sin(this.t * 0.5), dt, 3);
+      const gy = this.home.y + Math.sin(this.t * 0.8) * 0.4;
+      this.circleVel(w, this.home.x, this.home.z, 3, 2.6, this.circDir, gy);
+      this.fly(L, K, w, 5, dt);
       return;
     }
     if (this.act !== 'stalk') this.go('stalk');
     const lit = K.sunAt(t.pos) > 0.3;
-    this.orbitA += dt * 0.9;
     const R = lit ? 8 : 5.5;
-    const gx = t.pos.x + Math.cos(this.orbitA) * R, gz = t.pos.z + Math.sin(this.orbitA) * R;
-    const gy = this.hoverY(L, gx, gz, t.pos.y);
-    b.vel.set(clamp((gx - b.pos.x) * 2, -7, 7), clamp((gy - b.pos.y) * 2.5, -5, 5), clamp((gz - b.pos.z) * 2, -7, 7));
-    this.faceToward(t.pos.x, t.pos.z, dt, 6);
+    // circle him high up (banking), the circle travels with him
+    const ax = b.pos.x - t.pos.x, az = b.pos.z - t.pos.z, ar = Math.max(0.1, Math.hypot(ax, az));
+    const gy = this.hoverY(L, t.pos.x + (ax / ar) * R, t.pos.z + (az / ar) * R, t.pos.y);
+    this.circleVel(w, t.pos.x, t.pos.z, R, 4.6, this.circDir, gy);
+    w.x += t.vel.x * 0.7; w.z += t.vel.z * 0.7;
+    this.fly(L, K, w, 9, dt);
+    if (b.hitWall) this.circDir *= -1;
     if (!lit && this.cd <= 0 && this.los(L, t)) {
       const gyT = L.phys.groundAt(t.pos.x, t.pos.z, t.pos.y + 0.5, 0.1);
       this.spot.set(t.pos.x + t.vel.x * 0.35, gyT > -1e8 ? gyT : t.pos.y, t.pos.z + t.vel.z * 0.35);
@@ -554,16 +726,20 @@ export class Flyer3 extends Vamp3 {
   protected burn(L: Level3D, K: VampKit, dt: number) {
     if (this.act !== 'burn') { this.go('burn', 0); this.body.gravity = 0; audio.sfx('hiss', { pitch: 1.3 }); }
     const away = K.sunAway(this.body.pos, v2);
-    if (away) this.body.vel.set(away.x * 5, 3, away.z * 5); else this.halt(dt);
-    if (this.body.pos.y > this.home.y + 6) this.body.vel.y = 0;
+    if (away) { this.want.set(away.x * 5, this.body.pos.y > this.home.y + 6 ? 0 : 3, away.z * 5); this.fly(L, K, this.want, 12, dt); } else this.halt(dt, 8);
   }
   protected dmgMul() { return this.act === 'ground' ? 1.5 : 1; }
   protected pose() { return this.act === 'home' || this.act === 'idle' || this.act === 'stalk' ? 'fly' : this.act; }
   protected netMore() { return [this.spot.x, this.spot.y, this.spot.z]; }
   protected netMoreApply(a: number[], i: number) { this.spot.set(a[i], a[i + 1], a[i + 2]); }
-  protected visuals(L: Level3D) {
-    if (this.act === 'aim' || this.act === 'dive') this.mark.show(L, this.spot.x, this.spot.y, this.spot.z, 1.3, this.act === 'aim' ? 0.3 + 0.5 * this.pr : 0.8);
+  protected poof(): PoofStyle { return { smoke: ['#3d2b5c', '#2f2347', '#6a5490'], ash: ['#ff4a5a', '#ffe14a', '#ffb0c0'], bats: 3, size: 1.1, kind: 'topple' }; }
+  protected visuals(L: Level3D, dt: number) {
+    if (this.act === 'aim' || this.act === 'dive') this.mark.show(L, this.spot.x, this.spot.y, this.spot.z, 1.3, this.act === 'aim' ? this.pr : 1, this.act === 'aim' ? 0.55 + 0.45 * this.pr : 1, dt);
     else this.mark.hide();
+    const b = this.body;
+    if (this.act === 'dive' && Math.random() < 0.8) puffs(L, this.center(v), { count: 1, speed: [0, 0.2], life: [0.25, 0.4], size: [0.3, 0.45], grow: 1.5, colors: ['#4a3a66', '#3d2b5c'], alpha: 0.45, g: 0, tiles: [1, 3] });
+    if (this.act === 'ground' && this.seenAct === 'dive') puffs(L, v.copy(b.pos).setY(b.pos.y + 0.15), { count: 12, speed: [1.5, 3.5], spread: 1, flat: 0.85, life: [0.5, 0.9], size: [0.3, 0.5], grow: 2, colors: ['#a898c0', '#8a7c9e', '#c4b8d4'], alpha: 0.6, drag: 3, jitter: 0.3, tiles: [0, 2] });
+    if (this.act === 'rise' && Math.random() < 0.3) puffs(L, v.copy(b.pos).setY(b.pos.y + 0.05), { count: 1, speed: [1, 2], spread: 1, flat: 0.9, life: [0.4, 0.7], size: [0.25, 0.4], grow: 1.8, colors: ['#a898c0', '#8a7c9e'], alpha: 0.4, tiles: [0, 2] });
   }
 }
 
@@ -574,11 +750,12 @@ export class Mist3 extends Vamp3 {
   private dest = new THREE.Vector3();
   private lantern: Lantern | null = null;
   private clawed = false;
-  private mark = new GroundMark('#7ae0ff', true);
+  private mark = new TeleMark('#7ae0ff', 'fill');
   constructor(pos: THREE.Vector3, o: EnemyOpts = {}) {
     super('mist', pos, 0.36, 1.15, createMistling(), o);
     this.hp = this.maxHp = 4; this.loot = 3;
     this.marks.push(this.mark);
+    this.blob.scale.setScalar(0.6);
   }
   protected untouchable() { return this.act === 'mist' || (this.act === 'form' && this.pr < 0.6); }
   protected burnsNow() { return this.act !== 'mist'; }
@@ -587,7 +764,6 @@ export class Mist3 extends Vamp3 {
     this.dest.copy(dest);
     this.go('mist', 1.3);
     audio.sfx('mist');
-    L.fx.emit(this.center(), { count: 22, speed: [0.5, 2], life: [0.6, 1.1], size: [0.3, 0.6], size2: 1.6, colors: ['#c3cdee', '#9aa6d0', '#ffffff'], g: -0.5, drag: 2, jitter: 0.3 });
     return true;
   }
   protected brain(L: Level3D, K: VampKit, dt: number) {
@@ -655,12 +831,20 @@ export class Mist3 extends Vamp3 {
     }
   }
   protected dmgMul() { return this.act === 'recover' ? 1.5 : 1; }
-  protected visuals(L: Level3D) {
+  protected poof(): PoofStyle { return { smoke: ['#d4dcf8', '#aab4dc', '#8a94c6'], ash: ['#7ae0ff', '#ffffff', '#c8f4ff'], bats: 1, size: 1.3, kind: 'dissolve' }; }
+  protected visuals(L: Level3D, dt: number) {
     const b = this.body;
-    if (this.act === 'form') this.mark.show(L, b.pos.x, b.pos.y, b.pos.z, 1.6, 0.25 + 0.5 * this.pr); else this.mark.hide();
-    if ((this.act === 'mist' || this.act === 'form') && Math.random() < 0.6) {
-      const c = this.center(v);
-      ambient(L, () => L.fx.soft.emit(c.clone(), { count: 1, speed: [0.2, 0.8], life: [0.6, 1.2], size: [0.3, 0.55], size2: 1.8, colors: ['#c3cdee', '#aab4dc'], g: -0.4, drag: 2, jitter: 0.4 }));
+    if (this.act === 'form') this.mark.show(L, b.pos.x, b.pos.y, b.pos.z, 1.6, this.pr, 0.6 + 0.4 * this.pr, dt); else this.mark.hide();
+    const sp = Math.hypot(b.vel.x, b.vel.z);
+    // turning to mist: a burst; drifting as mist: a long trail; forming: wisps pulled in
+    if (this.act === 'mist' && this.seenAct !== 'mist') puffs(L, this.center(v), { count: 18, speed: [0.6, 2.2], spread: 1, life: [0.7, 1.3], size: [0.35, 0.6], grow: 1.9, colors: ['#dfe6ff', '#aab4dc', '#8a94c6'], alpha: 0.75, g: -0.3, drag: 2.2, jitter: 0.3, tiles: [0, 1, 2], swirl: 2.5 });
+    if (this.act === 'mist' && sp > 1 && Math.random() < 0.9) puffs(L, v.copy(b.pos).setY(b.pos.y + rand(0.2, 1)), { count: 1, speed: [0.1, 0.5], life: [0.7, 1.2], size: [0.35, 0.55], grow: 1.8, colors: ['#c9d2f4', '#9aa6d0'], alpha: 0.5, g: -0.15, drag: 2, jitter: 0.3, tiles: [1, 3] });
+    if (this.act === 'walk' && sp > 0.5 && Math.random() < 0.35) puffs(L, v.copy(b.pos).setY(b.pos.y + 0.15), { count: 1, speed: [0.1, 0.4], life: [0.6, 1], size: [0.3, 0.45], grow: 1.7, colors: ['#c9d2f4', '#9aa6d0'], alpha: 0.4, g: -0.1, tiles: [1, 3] });
+    // the claw leaves a misty streak
+    if (this.act === 'claw' && this.pr > 0.2 && this.pr < 0.85) {
+      this.rig.claw.getWorldPosition(v);
+      puffs(L, v, { count: 2, speed: [0, 0.3], life: [0.25, 0.45], size: [0.16, 0.26], grow: 1.5, colors: ['#e8f0ff', '#9ae8ff'], alpha: 0.7, g: 0, tiles: [1, 3] });
+      puffs(L, v, { count: 1, speed: [0, 0.3], life: [0.2, 0.35], size: [0.1, 0.16], grow: 0.6, colors: ['#7ae0ff'], alpha: 0.8, additive: true, tiles: [0] });
     }
   }
 }
@@ -702,7 +886,7 @@ export class Servant3 extends Vamp3 {
         return;
       }
       case 'retreat':
-        if (t) { v.set(b.pos.x - t.pos.x, 0, b.pos.z - t.pos.z).normalize(); this.steer(L, K, b.pos.x + v.x * 2, b.pos.z + v.z * 2, 3.6, dt, true); }
+        if (t) { v.set(b.pos.x - t.pos.x, 0, b.pos.z - t.pos.z).normalize(); this.steer(L, K, b.pos.x + v.x * 2, b.pos.z + v.z * 2, 3.6, dt, false); this.faceToward(t.pos.x, t.pos.z, dt, 8); }
         if (this.at <= 0) this.go('walk');
         return;
     }
@@ -720,6 +904,18 @@ export class Servant3 extends Vamp3 {
     super.hurt(L, dmg, from, kind);
     if (!this.dead && kind !== 'chord') this.stun = Math.max(this.stun, 0.6);
   }
+  protected poof(): PoofStyle { return { smoke: ['#4a4458', '#262033', '#7a7488'], ash: ['#ffd36a', '#ffffff', '#ff9ac0'], bats: 1, size: 1, kind: 'pop' }; }
+  deathFx(L: Level3D, c: THREE.Vector3) {
+    // seen at last: he shows fully for his poof, the tray clatters
+    if (this.invis) { this.invis.vis = 0.999; this.invis.apply(0, 1); }
+    ambient(L, () => L.fx.chunks(c.clone().setY(c.y + 0.4), 6, ['#d8dce6', '#b8bcc8', '#ffffff'], this.body.pos.y, [0.05, 0.1]));
+    super.deathFx(L, c);
+  }
+  protected visuals(L: Level3D) {
+    // a half-seen servant leaves a faint shimmer of dust when he moves
+    const b = this.body;
+    if (this.invis && this.invis.vis < 0.5 && Math.hypot(b.vel.x, b.vel.z) > 1 && Math.random() < 0.08) puffs(L, v.copy(b.pos).setY(b.pos.y + 0.05), { count: 1, speed: [0.1, 0.3], life: [0.4, 0.7], size: [0.2, 0.3], grow: 1.6, colors: ['#8a7f9c'], alpha: 0.25, tiles: [0, 2] });
+  }
 }
 
 // ═════════════════════════════ УПЫРЬ-ГРОМИЛА ═════════════════════════════
@@ -727,7 +923,8 @@ export class Brute3 extends Vamp3 {
   protected readonly ACTS = ['idle', 'walk', 'raise', 'slam', 'recover', 'punchPrep', 'punch', 'stun', 'burn', 'home'] as const;
   private punchCd = 0;
   private punched = false;
-  private ring = new GroundMark('#ff3040', true);
+  private ring = new TeleMark('#ff3040', 'fill');
+  private step = 0;
   static SLAM_R = 3.4;
   constructor(pos: THREE.Vector3, o: EnemyOpts = {}) {
     super('brute', pos, 0.6, 1.75, createBrute(), { aggro: 12, ...o });
@@ -787,31 +984,50 @@ export class Brute3 extends Vamp3 {
     this.go('raise', 1.0); this.cd = rand(3, 4.2) * this.cdMul(L);
     audio.sfx('roar', { pitch: 0.7, volume: 0.6 });
   }
-  private slam(L: Level3D, K: VampKit) {
+  /** where the fists land (every machine computes it from the replicated pose) */
+  private slamAt(L: Level3D, out: THREE.Vector3) {
     const b = this.body;
+    out.set(b.pos.x + Math.sin(this.yaw) * 0.6, b.pos.y, b.pos.z + Math.cos(this.yaw) * 0.6);
+    const gy = L.phys.groundAt(out.x, out.z, out.y + 0.5, 0.2);
+    if (gy > -1e8) out.y = gy;
+    return out;
+  }
+  private slam(L: Level3D, K: VampKit) {
     this.go('slam', 0.35);
-    L.tcam.shake(0.45);
+    L.tcam.shake(0.55);
+    L.hitstop(0.06);
     audio.sfx('bigSlam');
-    const c = b.pos.clone();
-    const fx = Math.sin(this.yaw), fz = Math.cos(this.yaw);
-    c.x += fx * 0.6; c.z += fz * 0.6;
+    const c = this.slamAt(L, new THREE.Vector3());
     for (const h of L.alivePlayers()) {
       const d = Math.hypot(h.pos.x - c.x, h.pos.z - c.z);
       if (d < 1.9 && h.pos.y - c.y < 1.2) h.hurt(L, 1, c, new THREE.Vector3((h.pos.x - c.x) / Math.max(0.3, d) * 9, 9, (h.pos.z - c.z) / Math.max(0.3, d) * 9), 0.35);
     }
-    const gy = L.phys.groundAt(c.x, c.z, c.y + 0.5, 0.2);
-    L.addWave(new Wave3(new THREE.Vector3(c.x, gy > -1e8 ? gy : c.y, c.z), 9, Brute3.SLAM_R + 2.4, 0.8));
+    // the gameplay wave (replicated; its plain torus is hidden by the QuakeFx every machine draws)
+    L.addWave(new Wave3(c.clone(), 9, Brute3.SLAM_R + 2.4, 0.8));
     K.snuffAround(c, Brute3.SLAM_R + 1);
-    L.fx.dust(c.clone(), 24, '#b8a8d0');
-    L.fx.ring(c.clone().setY(c.y + 0.1), Brute3.SLAM_R, '#ff6a7a', 0.4);
   }
   protected dmgMul() { return this.act === 'recover' ? 1.5 : 1; }
-  protected visuals(L: Level3D) {
+  protected poof(): PoofStyle { return { smoke: ['#5a4a70', '#3a2d58', '#7a6c9c'], ash: ['#ff4a5a', '#ffe14a', '#ffb0c0'], bats: 5, size: 2, kind: 'topple' }; }
+  protected visuals(L: Level3D, dt: number) {
     const b = this.body;
     if (this.act === 'raise') {
-      const fx = Math.sin(this.yaw), fz = Math.cos(this.yaw);
-      this.ring.show(L, b.pos.x + fx * 0.6, b.pos.y, b.pos.z + fz * 0.6, Brute3.SLAM_R * (0.55 + 0.45 * this.pr), 0.3 + 0.5 * this.pr);
+      const c = this.slamAt(L, v);
+      this.ring.show(L, c.x, c.y, c.z, Brute3.SLAM_R, this.pr, 0.55 + 0.45 * this.pr, dt);
+      // pebbles and dust lifting off the ground as he gathers strength
+      if (this.pr > 0.3 && Math.random() < 0.4) { const a = rand(0, TAU), r = rand(0.5, Brute3.SLAM_R); ambient(L, () => L.fx.soft.emit(v2.set(c.x + Math.cos(a) * r, c.y + 0.05, c.z + Math.sin(a) * r), { count: 1, speed: [0.5, 1.5], dir: UP, spread: 0.1, life: [0.4, 0.7], size: [0.05, 0.09], colors: ['#8a7f9c', '#6d6380'], g: 2, drag: 1 })); }
     } else this.ring.hide();
+    // the slam lands: the shockwave (drawn locally, synced to the gameplay wave's radius)
+    if (this.act === 'slam' && this.seenAct !== 'slam') L.actors.push(new QuakeFx(L, this.slamAt(L, new THREE.Vector3()), 0.8, 9, Brute3.SLAM_R + 2.4));
+    // heavy footsteps: a puff of dust under each stomp
+    const sp = Math.hypot(b.vel.x, b.vel.z);
+    if (sp > 0.3 && this.act !== 'slam') {
+      this.step += dt * sp * 2.0;
+      if (this.step > Math.PI) {
+        this.step -= Math.PI;
+        const side = Math.random() < 0.5 ? 1 : -1, cx = Math.cos(this.yaw), cz = -Math.sin(this.yaw);
+        puffs(L, v.set(b.pos.x + cx * side * 0.25, b.pos.y + 0.05, b.pos.z + cz * side * 0.25), { count: 3, speed: [0.5, 1.4], spread: 1, flat: 0.9, life: [0.4, 0.7], size: [0.22, 0.35], grow: 1.8, colors: ['#a898c0', '#8a7c9e'], alpha: 0.45, drag: 3, tiles: [0, 2] });
+      }
+    }
   }
 }
 

@@ -589,12 +589,14 @@ const pryanik: Paint = (c, s) => {
 const zefirych: Paint = (c, s) => {
   const skin = '#fff3f6';
   // lamplighter's pole with a lantern on the right
+  c.save(); c.translate(1, 12);
   toon(c, (cc) => { cc.roundRect(32, -24, 4, 90, 2); }, '#8a6a3a', { lw: LF, off: 1.5, rim: null });
   glowAt(c, 34, -32, 16, '#ffd060', 0.75);
   toon(c, poly([28, -28, 40, -28, 38, -38, 30, -38]), '#3a3a5a', { lw: LF, off: 1.5 });
   flat(c, (cc) => { cc.roundRect(30.5, -37, 7, 8, 1.5); }, '#ffe890', LD * 0.6);
   dot(c, 34, -32.5, 2, '#ffffff');
   toon(c, poly([29, -38, 34, -44, 39, -38]), '#3a3a5a', { lw: LF, off: 1 });
+  c.restore();
   torso(c, '#5a5a92');
   for (const by of [40, 50]) toon(c, O(-8, by, 2.4), '#e8c060', { lw: LD, off: 1, rimW: 1 });
   toon(c, poly([-12, 31, 12, 31, 0, 42]), '#f0eaff', { lw: LF, off: 1.5 });
@@ -776,14 +778,14 @@ const kamysh: Paint = (c, s) => {
   toon(c, head, skin, { off: 5, sh: skinD });
   inside(c, head, () => { c.fillStyle = belly; c.beginPath(); E(0, 26, 27, 13)(c); c.fill(); });
   for (const sd of [-1, 1]) dot(c, sd * 3.5, 6, 1.1, '#3e6a2a');
+  // the reed in the mouth corner
+  const sway = Math.sin(s.t * 1.6) * 1.5;
+  stroke(c, (cc) => { cc.moveTo(12, 17); cc.quadraticCurveTo(28, 10, 42, -4 + sway); }, INK, 4.4);
+  stroke(c, (cc) => { cc.moveTo(12, 17); cc.quadraticCurveTo(28, 10, 42, -4 + sway); }, '#d8b860', 2.2);
+  toon(c, E(41, -6 + sway, 2.8, 6.5, 0.7), '#7a4a2a', { lw: LD, off: 1 });
   features(c, { ex: 16, ey: -9, erx: 7.4, ery: 7.4, iris: '#c8a020', skin, slit: false, lid: 0.42, brow: '#f4f2e8', browW: 11, browLw: 3.4, browInk: true, browY: 4.5, my: 16, mw: 30, blush: null, nose: null }, s);
   // wrinkles
   for (const sd of [-1, 1]) stroke(c, (cc) => { cc.moveTo(sd * 10, 4); cc.quadraticCurveTo(sd * 16, 6, sd * 22, 4); }, skinD, 1.4);
-  // the reed in the mouth corner
-  const sway = Math.sin(s.t * 1.6) * 1.5;
-  stroke(c, (cc) => { cc.moveTo(13, 17); cc.quadraticCurveTo(28, 10, 42, -4 + sway); }, INK, 4.4);
-  stroke(c, (cc) => { cc.moveTo(13, 17); cc.quadraticCurveTo(28, 10, 42, -4 + sway); }, '#d8b860', 2.2);
-  toon(c, E(41, -6 + sway, 2.8, 6.5, 0.7), '#7a4a2a', { lw: LD, off: 1 });
 };
 
 // ── Матушка Светлячиха: огромный добрый светлячок — бархатные крылья, перистые усики, светящееся брюшко ──
@@ -792,9 +794,9 @@ const svetlyachikha: Paint = (c, s) => {
   const pulse = 0.75 + 0.25 * Math.sin(s.t * 2.4);
   // velvet wings
   for (const sd of [-1, 1]) {
-    const wing = E(sd * 32, 14, 17, 30, sd * 0.45);
-    toon(c, wing, '#8a6aa8', { sh: '#6a4a88', off: 4, rim: '#c8b0e0' });
-    inside(c, wing, () => { for (const [dx, dy] of [[0, 2], [4, 16], [-3, 26]]) dot(c, sd * (30 + dx), dy, 2.2, 'rgba(255,230,140,0.6)'); });
+    const wing = E(sd * 30, 18, 12, 22, sd * 0.55);
+    toon(c, wing, '#a888c4', { sh: '#7a5a9a', off: 3.5, rim: '#e0d0f0' });
+    inside(c, wing, () => { for (const [dx, dy] of [[-2, 10], [3, 20], [-1, 28]]) dot(c, sd * (30 + dx), dy, 1.8, 'rgba(255,240,170,0.8)'); });
   }
   // the glowing belly below
   glowAt(c, 0, 52, 30 * pulse + 6, '#ffe070', 0.9);
@@ -804,10 +806,10 @@ const svetlyachikha: Paint = (c, s) => {
   toon(c, (cc) => { cc.moveTo(-26, 30); cc.quadraticCurveTo(0, 44, 26, 30); cc.lineTo(20, 26); cc.quadraticCurveTo(0, 34, -20, 26); cc.closePath(); }, '#fff4e0', { lw: LF, off: 1.5, sh: '#ecdcc0' });
   // feathery antennae
   for (const sd of [-1, 1]) {
-    const tip: [number, number] = [sd * 32, -40 + Math.sin(s.t * 1.8 + sd) * 1.5];
-    stroke(c, (cc) => { cc.moveTo(sd * 7, -20); cc.quadraticCurveTo(sd * 14, -44, tip[0], tip[1]); }, INK, 2.6);
-    c.save(); c.translate(tip[0] - sd * 4, tip[1] + 3); c.rotate(sd * -0.6);
-    toon(c, E(0, 0, 4, 9), '#7a5a90', { lw: LD, off: 1.5 });
+    const tip: [number, number] = [sd * 27, -33 + Math.sin(s.t * 1.8 + sd) * 1.2];
+    stroke(c, (cc) => { cc.moveTo(sd * 7, -18); cc.quadraticCurveTo(sd * 12, -36, tip[0], tip[1]); }, INK, 2.6);
+    c.save(); c.translate(tip[0] + sd * 2, tip[1] + 2); c.rotate(sd * 0.9);
+    toon(c, E(0, 0, 4, 8), '#7a5a90', { lw: LD, off: 1.5 });
     for (let i = -3; i <= 3; i++) stroke(c, (cc) => { cc.moveTo(0, i * 2.2); cc.lineTo(sd * 3.6, i * 2.2 - 1); }, '#c8a8e0', 0.9);
     c.restore();
   }

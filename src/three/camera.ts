@@ -71,9 +71,9 @@ export class TPCamera {
   /** colliders the orbit camera passes through (e.g. the boss's moving palms — they'd pump the zoom) */
   camSkip: ((c: Collider) => boolean) | null = null;
   /**
-   * raised ambush rings (arena bars) around: the orbit looks THROUGH the thin bars instead of being shoved against
-   * their tall invisible wall (it used to end up inside a bar, right on top of the hero); it only keeps its lens off
-   * the ring of bars itself. Set by the level each frame (x, z: centre; r: radius; y0..y1: the bars' height).
+   * raised ambush rings (arena bars) around: instead of being shoved against their tall invisible wall (it used to end
+   * up inside a bar, 1.2 m from the hero, the hero filling the screen) the orbit rides up inside the ring (ringLift).
+   * Set by the level each frame (x, z: centre; r: radius; y0..y1: the bars' height).
    */
   rings: { x: number; z: number; r: number; y0: number; y1: number }[] = [];
   private skipRing = (c: Collider) => (c.tag === 'gate') || (this.camSkip ? this.camSkip(c) : false);
@@ -208,9 +208,9 @@ export class TPCamera {
       let d = this.dist;
       if (phys) {
         const ringy = this.rings.length > 0;
+        if (ringy) this.ringLift(af, tmpD, d);
         const hit = phys.raycast(af, tmpD, d + 0.4, ringy ? this.skipRing : this.camSkip ?? undefined);
         if (hit < d + 0.4) d = Math.max(1.2, hit - 0.4);
-        if (ringy) d = this.offRings(af, tmpD, d, phys);
       }
       // boss fight: pulled in at once (never through a wall), eased back out (no zoom pumping past pillars)
       if (this.colD < 0 || d <= this.colD || this.mode !== 'boss') this.colD = d;
@@ -235,31 +235,28 @@ export class TPCamera {
   }
 
   /**
-   * keep the lens out of a ring of bars: a camera point within RING_GAP of the ring (horizontally, at the bars'
-   * height) moves along the view ray past it — outward when there is room behind (nothing solid), else in front of it
+   * inside a raised ring of bars the orbit stays inside the ring: where the ring cuts the orbit short (my hero by the
+   * bars, the camera turned toward them), the camera rides UP over the hero instead of being shoved into the bars —
+   * the same orbit length, a steeper look down (the hero stays whole in view). Turns `dir` in place.
    */
-  private offRings(o: THREE.Vector3, dir: THREE.Vector3, d: number, phys: PhysWorld) {
-    const GAP = 0.6;
-    const hx = dir.x, hz = dir.z, hh = hx * hx + hz * hz;
-    if (hh < 1e-6) return d;
+  private ringLift(o: THREE.Vector3, dir: THREE.Vector3, d: number) {
+    const MARGIN = 0.9, MIN_H = 0.9;
     for (const g of this.rings) {
-      const px = o.x + hx * d - g.x, pz = o.z + hz * d - g.z;
-      const py = o.y + dir.y * d;
-      if (py < g.y0 - 0.5 || py > g.y1 + 0.4) continue;
-      const rr = Math.hypot(px, pz);
-      if (Math.abs(rr - g.r) >= GAP) continue;
-      // t where the ray's horizontal distance from the centre is R: |o + t·dir|² = R² (horizontal)
       const ox = o.x - g.x, oz = o.z - g.z;
-      const b = ox * hx + oz * hz, cc0 = ox * ox + oz * oz;
-      const tAt = (R: number, far: boolean) => { const disc = b * b - hh * (cc0 - R * R); if (disc < 0) return -1; const q = Math.sqrt(disc); return (far ? -b + q : -b - q) / hh; };
-      const inside = Math.hypot(ox, oz) < g.r;
-      // the side beyond the ring (outward from inside, inward from outside), else the near side
-      const tBeyond = inside ? tAt(g.r + GAP, true) : tAt(g.r - GAP, false);
-      const tNear = inside ? tAt(g.r - GAP, true) : tAt(g.r + GAP, false);
-      if (tBeyond > 0 && tBeyond < 16 && phys.raycast(o, dir, tBeyond + 0.4, this.skipRing) >= tBeyond + 0.4) d = tBeyond;
-      else if (tNear > 0) d = Math.max(Math.min(1.2, d), tNear);
+      if (Math.hypot(ox, oz) > g.r || o.y < g.y0 - 1 || o.y > g.y1 + 1) continue;
+      const hl = Math.hypot(dir.x, dir.z);
+      if (hl < 1e-4) continue;
+      const ux = dir.x / hl, uz = dir.z / hl;
+      // how far the camera may go horizontally (to R − MARGIN along the orbit's bearing)
+      const R = g.r - MARGIN, b = ox * ux + oz * uz, c0 = ox * ox + oz * oz - R * R;
+      const disc = b * b - c0;
+      const allow = Math.max(MIN_H, disc > 0 ? -b + Math.sqrt(disc) : 0);
+      const want = d * hl;
+      if (want <= allow) continue;
+      const h = Math.min(want, allow);
+      const v = Math.sqrt(Math.max(0, d * d - h * h));
+      dir.set(ux * h, Math.max(v, d * dir.y), uz * h).normalize();
     }
-    return d;
   }
 
   /** cinematic: camera moves toward cinePos and looks at cineLook */

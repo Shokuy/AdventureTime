@@ -9,6 +9,9 @@ import type { Level3D } from '../../level';
 import type { Level3Def } from '../../levels';
 import { addGrappleRing } from '../../heroes';
 import { buildTown, townProps as T, createFolk, TOWN_NIGHT, type TownLayout } from '../town';
+import { B, tmat, tm, glow } from '../town/kit';
+import { marshTex, stripeTex } from '../town/tex';
+import type { BoxCol } from '../../../physics/types';
 import type { FolkRig, FolkAnim } from '../town';
 import { vamp, isVamp, ambient, createBat, type VampKit, type GreyZone, type Lantern, type VRig } from '../vampires';
 import { Cast } from './cast';
@@ -38,8 +41,13 @@ export const TOWN_ID = 'fangs1_town';
 const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 const vec = V;
 
-/** the clock tower (layout: −13.5, −15.5, r 2.6) — its door faces the square */
-export const TOWER = { x: -13.5, z: -15.5, r: 2.6, door: V(-13.5, 0, -12.6), spire: V(-13.5, 23.1, -15.5) };
+/**
+ * the clock tower (layout: −13.5, −15.5, r 2.6) — its door faces the square: a little gabled porch built onto the
+ * tower's foot (TowerDoor), its mouth at `door`; inside, the first steps of the stair wind up into the dark
+ */
+export const TOWER = { x: -13.5, z: -15.5, r: 2.6, door: V(-13.5, 0, -11.2), spire: V(-13.5, 23.1, -15.5) };
+/** the porch, in the tower's frame (+z toward the square): half the opening's width, the mouth's z, the back */
+const PORCH = { hw: 0.9, wall: 0.45, front: 4.3, back: 1.9, h: 2.9 };
 /** the story four at the foot of the tower (5.1) */
 export const MARKS = {
   tosha: V(-14.2, 0, -9.6), bublik: V(-13.0, 0, -8.4), pastila: V(-15.8, 0, -10.4), noki: V(-17.4, 0, -11.6),
@@ -137,7 +145,7 @@ class Veil {
     this.mat = new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), color: '#a8a4b8', transparent: true, opacity: 0.7, depthWrite: false });
     for (let i = 0; i < 22; i++) {
       const s = new THREE.Sprite(this.mat);
-      const p = { s, a: (i / 22) * Math.PI * 2, r: 3.0 + (i % 3) * 0.25, y: 0.5 + (i % 5) * 0.75, sz: 2.2 + (i % 4) * 0.5 };
+      const p = { s, a: (i / 22) * Math.PI * 2, r: 3.2 + (i % 3) * 0.3, y: 0.5 + (i % 5) * 0.75, sz: 2.2 + (i % 4) * 0.5 };
       s.scale.setScalar(p.sz);
       noOutline(s);
       this.obj.add(s);
@@ -149,7 +157,7 @@ class Veil {
     g2.beginPath(); for (let a = 0; a < Math.PI * 7; a += 0.05) { const r = a * 2.6; const x = 64 + Math.cos(a) * r, y = 64 + Math.sin(a) * r; if (a === 0) g2.moveTo(x, y); else g2.lineTo(x, y); } g2.stroke();
     this.sealM = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(sw), color: '#c8c4d8', transparent: true, opacity: 0.8, depthWrite: false, side: THREE.DoubleSide });
     this.seal = new THREE.Mesh(new THREE.CircleGeometry(1.25, 32), this.sealM);
-    this.seal.position.set(0, 1.35, TOWER.r + 0.12);
+    this.seal.position.set(0, 1.4, PORCH.front + 0.16);
     noOutline(this.seal);
     this.obj.add(this.seal);
     this.obj.position.set(TOWER.x, 0, TOWER.z);
@@ -162,10 +170,94 @@ class Veil {
     this.seal.rotation.z = t * 0.8;
     for (const p of this.puffs) {
       const a = p.a + t * 0.35;
-      p.s.position.set(Math.sin(a) * p.r, p.y + Math.sin(t * 1.3 + p.a * 3) * 0.25, Math.cos(a) * p.r);
+      // (round the porch too: the ring bulges out over the door)
+      const r = p.r + Math.max(0, Math.cos(a)) ** 2 * (PORCH.front - 2.6);
+      p.s.position.set(Math.sin(a) * r, p.y + Math.sin(t * 1.3 + p.a * 3) * 0.25, Math.cos(a) * r);
     }
     this.obj.visible = this.k > 0.01 && !this.hidden;
   }
+}
+
+/**
+ * The way into the clock tower: a gabled porch on the tower's foot with a pair of arched doors (shut — a real wall —
+ * until the veil falls, then they swing in), the first steps of the stair winding up into the dark behind them and a
+ * lantern over the mouth. The exit zone is inside the porch: the heroes walk in through the doors (exit_fangs1_town).
+ */
+class TowerDoor {
+  private leaves: THREE.Group[] = [];
+  private col: BoxCol;
+  private openK = 0;
+  open = false;
+  constructor(L: Level3D) {
+    const pal = TOWN_NIGHT, P = PORCH;
+    const b = new B('porch');
+    const wallM = tmat(marshTex(pal.walls[3]));
+    const icing = tm(pal.icing);
+    // side walls (the tower's wall closes the back)
+    for (const sx of [-1, 1]) {
+      const x0 = sx * P.hw, x1 = sx * (P.hw + P.wall);
+      b.bx(wallM, P.wall, P.h, P.front - P.back, (x0 + x1) / 2, P.h / 2, (P.back + P.front) / 2, 1);
+      b.box(Math.min(x0, x1), 0, P.back, Math.max(x0, x1), P.h, P.front);
+      // an icing pilaster at the mouth
+      b.bx(icing, P.wall + 0.12, P.h, 0.16, (x0 + x1) / 2, P.h / 2, P.front + 0.02);
+    }
+    // the roof slab, a striped gable over it
+    const rw = 2 * (P.hw + P.wall) + 0.3;
+    b.bx(icing, rw, 0.26, P.front - P.back + 0.3, 0, P.h + 0.13, (P.back + P.front) / 2 + 0.15);
+    b.box(-rw / 2, P.h, P.back, rw / 2, P.h + 0.26, P.front + 0.3);
+    const gs = new THREE.Shape(); gs.moveTo(-rw / 2, 0); gs.lineTo(rw / 2, 0); gs.lineTo(0, 1.0); gs.closePath();
+    const gable = new THREE.ExtrudeGeometry(gs, { depth: P.front - P.back + 0.3, bevelEnabled: false });
+    b.m(gable, tmat(stripeTex(pal.roofs[4], '#4a1a3a', 6)), 0, P.h + 0.26, P.back);
+    // the arch over the mouth: spandrels + an icing rim
+    const sp = new THREE.Shape();
+    sp.moveTo(-P.hw, 2.0); sp.lineTo(-P.hw, P.h); sp.lineTo(P.hw, P.h); sp.lineTo(P.hw, 2.0); sp.absarc(0, 2.0, P.hw, 0, Math.PI, false);
+    b.m(new THREE.ExtrudeGeometry(sp, { depth: 0.14, bevelEnabled: false }), wallM, 0, 0, P.front - 0.1);
+    b.m(new THREE.TorusGeometry(P.hw, 0.07, 8, 24, Math.PI), icing, 0, 2.0, P.front + 0.06);
+    // inside: the dark stairwell in the tower's wall and the first steps winding up into it, a candle on the way
+    const dk = new THREE.Shape();
+    dk.moveTo(-0.72, 0); dk.lineTo(0.72, 0); dk.lineTo(0.72, 1.9); dk.absarc(0, 1.9, 0.72, 0, Math.PI, false); dk.closePath();
+    b.m(new THREE.ShapeGeometry(dk), new THREE.MeshBasicMaterial({ color: '#160c1a' }), 0, 0, 2.72, { cast: false });
+    const stepM = tm('#7a5a8a');
+    for (let i = 0; i < 5; i++) b.bx(stepM, 0.46, 0.14, 0.34, -0.5 + i * 0.27, 0.12 + i * 0.36, 2.86, 0, { cast: false });
+    b.bx(tm('#9a7aa8'), 1.6, 0.12, 0.5, 0, 0.06, 2.95);
+    const candle = glow('#ffc070', 0.9, 0.8); candle.position.set(0.55, 1.95, 2.95); b.root.add(candle);
+    // a lantern over the mouth
+    b.sp(tm('#ffd34a', { emissive: '#ffb030', emissiveIntensity: 0.9 }), 0.16, 0, P.h - 0.32, P.front + 0.3, 12, { cast: false });
+    b.bx(tm('#3a2a3a'), 0.04, 0.3, 0.04, 0, P.h - 0.1, P.front + 0.3);
+    const lg = glow('#ffd8a0', 1.6, 0.6); lg.position.set(0, P.h - 0.32, P.front + 0.3); b.root.add(lg);
+    // the doors: two arched leaves on hinges at the mouth's sides
+    const leafM = tm('#8a4e2e'), bandM = tm('#c8a050');
+    for (const sx of [-1, 1]) {
+      const hinge = b.group(sx * P.hw, 0, P.front - 0.02, undefined, true);
+      const ls = new THREE.Shape();
+      const w = P.hw - 0.02;
+      // (built from the hinge toward the middle: x = −sx·(0..w))
+      ls.moveTo(0, 0); ls.lineTo(w, 0); ls.lineTo(w, 2.0 + Math.sqrt(Math.max(0, P.hw * P.hw - (P.hw - w) * (P.hw - w))) - 0.04);
+      for (let k = 1; k <= 8; k++) { const a = Math.PI / 2 + (k / 8) * (Math.PI / 2); ls.lineTo(w + Math.cos(a) * w, 2.0 + Math.sin(a) * (P.hw - 0.04)); }
+      ls.lineTo(0, 0);
+      const leaf = b.m(new THREE.ExtrudeGeometry(ls, { depth: 0.08, bevelEnabled: false }), leafM, 0, 0, -0.04, { parent: hinge, dyn: true });
+      leaf.scale.x = -sx;
+      for (const y of [0.5, 1.6]) b.bx(bandM, w * 0.9, 0.08, 0.1, -sx * w * 0.5, y, 0, 0, { parent: hinge, dyn: true });
+      b.sp(bandM, 0.06, -sx * (w - 0.18), 1.05, 0.07, 8, { parent: hinge, dyn: true });
+      this.leaves.push(hinge);
+    }
+    L.add(b.done(TOWER.x, 0, TOWER.z, 0));
+    // the shut doors are a wall until the veil falls
+    this.col = { kind: 'box', min: V(TOWER.x - P.hw, 0, TOWER.z + P.front - 0.2), max: V(TOWER.x + P.hw, P.h, TOWER.z + P.front + 0.05) };
+    L.col(this.col);
+    // a sign over the porch
+    L.add(T.facadeSign({ x: TOWER.x, y: P.h + 0.7, z: TOWER.z + P.front + 0.36, label: 'ЧАСОВАЯ БАШНЯ', color: '#ffd34a', w: 2.0, pal }));
+  }
+  update(dt: number) {
+    this.col.active = !this.open;
+    const want = this.open ? 1 : 0;
+    if (Math.abs(this.openK - want) < 0.001) return;
+    this.openK = damp(this.openK, want, 2.2, dt);
+    // (they swing in, flat against the porch's walls)
+    this.leaves.forEach((h, i) => { h.rotation.y = (i === 0 ? 1 : -1) * 1.5 * this.openK; });
+  }
+  /** shut / open now (the exit scene closes them behind the heroes) */
+  set(on: boolean, now = false) { this.open = on; if (now) { this.openK = on ? 1 : 0; this.update(0); } }
 }
 
 /** the level's runtime (L.refs.f1town) */
@@ -177,6 +269,7 @@ export class NightTown {
   westLanterns: Lantern[] = [];
   garlands: Garlands;
   veil: Veil;
+  door: TowerDoor;
   squirt: Squirter;
   /** the intro is on (deco townsfolk, the Count on the spire) */
   introOn = false;
@@ -192,6 +285,9 @@ export class NightTown {
   /** a toast waiting for the chapter banner to clear (it would sit on the banner's lines) */
   private later: { str: string; t: number; dur: number } | null = null;
   private bats: { g: THREE.Group; rig: VRig; from: THREE.Vector3; to: THREE.Vector3; t: number; d: number }[] = [];
+  /** where the golden walnuts lie (a faint golden twinkle over each until it is found: seen from a way off) */
+  private nutSpots: THREE.Vector3[] = [];
+  private twinkleT = 0;
 
   constructor(readonly L: Level3D) {
     L.refs.f1town = this;
@@ -231,6 +327,7 @@ export class NightTown {
     L.signAt(-29.6, 0, 11.6, SIGNS.lantern);
     // the veil, the garlands
     this.veil = new Veil(L);
+    this.door = new TowerDoor(L);
     const lamps = this.lay.lamps.slice(0, 8).map((p) => V3(p).setY(3.05));
     const spans: [THREE.Vector3, THREE.Vector3][] = lamps.map((p, i) => [p, lamps[(i + 1) % 8]]);
     spans.push([vec(TOWER.x + 1.6, 8.5, TOWER.z + 1.6), lamps[4]], [vec(TOWER.x + 1.6, 8.5, TOWER.z + 1.6), lamps[5]], [lamps[0], lamps[4]], [lamps[2], lamps[6]]);
@@ -330,6 +427,9 @@ export class NightTown {
     line(vec(38.5, 6.6, 10.4), vec(38.5, 6.6, 13.6), 3);
     const last = this.lay.roofRoute[this.lay.roofRoute.length - 1];
     L.pick('nut', last.x, last.y + 0.75, last.z, 'nut_f1_tower');
+    this.nutSpots.push(vec(last.x, last.y + 0.75, last.z));
+    // (the hub's hint, at the night's crates)
+    L.signAt(35.2, 0, -17.6, 'Ящики, крыши, мостик… А что там, на балконе башни?');
     // Бублик's hook: a ring over the first flat roof (straight up from the lane)
     addGrappleRing(L, 34.2, 6.6, -4.5);
   }
@@ -369,12 +469,29 @@ export class NightTown {
     wall(cx - 1.9, 0, cz + 1.9, cx - 0.8, 2.6, cz + 2.2);
     wall(cx + 0.8, 0, cz + 1.9, cx + 1.9, 2.6, cz + 2.2);
     wall(cx - 0.8, 0.62, cz + 1.9, cx + 0.8, 2.6, cz + 2.2);
-    wall(cx - 2.4, 2.6, cz - 2.4, cx + 2.4, 2.95, cz + 2.4, roofM);
+    // the roof, with a hatch (x +0.4..+1.6, z −1.7..−0.5) for those who don't fit under the door: up the crates by the
+    // east wall, down through the hatch onto the crate inside, and back out the same way (the walnut for every hero;
+    // Ноки's bat still has the short way, under the door)
+    const H = { x0: cx + 0.4, x1: cx + 1.6, z0: cz - 1.7, z1: cz - 0.5 };
+    wall(cx - 2.4, 2.6, cz - 2.4, H.x0, 2.95, cz + 2.4, roofM);
+    wall(H.x1, 2.6, cz - 2.4, cx + 2.4, 2.95, cz + 2.4, roofM);
+    wall(H.x0, 2.6, cz - 2.4, H.x1, 2.95, H.z0, roofM);
+    wall(H.x0, 2.6, H.z1, H.x1, 2.95, cz + 2.4, roofM);
+    // the hatch's lid, flung open (deco), a rim of icing round the hole
+    const lid = new THREE.Mesh(new THREE.BoxGeometry(H.x1 - H.x0, 0.08, H.z1 - H.z0), new THREE.MeshToonMaterial({ color: '#8a4e2e' }));
+    const half = (H.z1 - H.z0) / 2, th = 1.92; // (hinged on the hole's far edge, leaning back past upright)
+    lid.position.set((H.x0 + H.x1) / 2, 2.95 + half * Math.sin(th), H.z0 + half * Math.cos(th));
+    lid.rotation.x = -th;
+    hut.add(lid);
+    L.add(T.candyCrate({ x: cx + 1.0, y: 0, z: cz - 1.1, s: 1.2, pal, color: pal.candy[3] }));
+    L.add(T.candyCrate({ x: cx + 3.2, y: 0, z: cz - 0.6, s: 1.3, pal, color: pal.candy[1] }));
+    L.add(T.candyCrate({ x: cx + 3.3, y: 0, z: cz + 0.9, s: 0.8, pal, color: pal.candy[4] }));
     L.deco(hut);
-    L.pick('nut', cx, 0.7, cz - 0.6, 'nut_f1_cellar');
-    L.pick('bigcrumb', cx - 1.0, 0.5, cz - 1.0, 'f1_cellar_a');
-    L.pick('bigcrumb', cx + 1.0, 0.5, cz - 1.0, 'f1_cellar_b');
-    L.signAt(cx + 2.6, 0, cz + 2.6, 'Погреб Зефирыча. Ключ потерян. Щель под дверью — для мышей');
+    this.nutSpots.push(V(cx - 0.5, 0.7, cz - 0.6));
+    L.pick('nut', cx - 0.5, 0.7, cz - 0.6, 'nut_f1_cellar');
+    L.pick('bigcrumb', cx - 1.2, 0.5, cz - 1.0, 'f1_cellar_a');
+    L.pick('bigcrumb', cx + 1.0, 1.2 + 0.5, cz - 1.1, 'f1_cellar_b');
+    L.signAt(cx + 2.6, 0, cz + 2.6, 'Погреб Зефирыча. Ключ потерян. Щель под дверью — для мышей, люк на крыше — для смелых');
     void pal;
   }
 
@@ -500,15 +617,32 @@ export class NightTown {
     const open = done >= REQUIRED.length;
     if (open && !this.veil.open) {
       this.veil.open = true;
-      L.exit(TOWER.x - 2.2, -1, TOWER.door.z - 0.2, TOWER.x + 2.2, 4, TOWER.door.z + 2.8);
+      this.door.set(true);
+      // (inside the porch, past the doors: the heroes walk into the tower)
+      L.exit(TOWER.x - PORCH.hw, -1, TOWER.z + 2.9, TOWER.x + PORCH.hw, 4, TOWER.door.z - 0.35);
       if (!this.introOn) { L.hud.toast(TOAST.veilGone, 5); ambient(L, () => { L.fx.stars(V(TOWER.x, 2.5, TOWER.z + 3), 40, ['#ffe14a', '#fff3c0', '#ff9fc0']); audio.sfx('colorRestore', { pitch: 0.9 }); }); }
     }
     this.veil.update(t, dt);
+    this.door.update(dt);
     if (!open && !this.veilToast && !this.introOn && !L.inCutscene && L.seen.has('fangs1_intro') && (this.zones.get('square')!.state !== 'grey' || Math.hypot(L.player.pos.x - TOWER.x, L.player.pos.z - TOWER.z) < 7.5) && this.t > 9) { this.veilToast = true; L.hint('f1veil', TOAST.veil); }
     L.refs.goalHint = open ? undefined : this.nextGoal();
     // the story four's lines on the way (solo)
     this.lines();
     this.squirt.update(dt);
+    this.twinkle(dt);
+  }
+
+  /** golden sparks rising over a walnut not found yet (within ~28 m: a hint from the street / the next roof) */
+  private twinkle(dt: number) {
+    const L = this.L;
+    if ((this.twinkleT += dt) < 0.22 || this.introOn) return;
+    this.twinkleT = 0;
+    const p = L.player.pos;
+    for (const n of L.pickups) {
+      if (n.kind !== 'nut' || n.dead || !this.nutSpots.some((s) => s.distanceToSquared(n.pos) < 1)) continue;
+      if (n.pos.distanceToSquared(p) > 28 * 28) continue;
+      L.fx.glow.emit(n.pos.clone().add(V(0, 0.6, 0)), { count: 1, speed: [0.3, 0.9], life: [0.8, 1.4], size: [0.1, 0.2], colors: ['#ffe14a', '#fff3c0'], g: -0.9 });
+    }
   }
 
   private nextGoal(): THREE.Vector3 | undefined {
