@@ -28,7 +28,7 @@ import { profile } from '../net/profile';
 import { net } from '../net/session';
 import { coop } from './game/coop';
 import { coopFlow } from './game/coopFlow';
-import { prologueDone, episodeList, epState, playEpisode, myProgress, type Episode } from './game/episodes';
+import { prologueDone, myProgress } from './game/episodes';
 import { MenuTown } from './scenes/menuTown';
 import { LobbyScene, drawCrown } from './scenes/lobby';
 import { ChatPanel } from '../ui/chat';
@@ -87,14 +87,6 @@ function logoSubtitle(): { text: string; color: string } {
   return { text: 'Ночь клыков', color: '#9a2a4a' };
 }
 
-/** the save line after the prologue: the series to play next ('Серия 3 из 6') or the arc done */
-function seriesNow(): string {
-  const prog = myProgress();
-  const eps = episodeList().filter((e) => e.n >= 1).sort((a, b) => a.n - b.n);
-  const next = eps.find((e) => epState(e, prog) === 'available');
-  return next ? `Серия ${next.n} из ${eps.length}` : 'арка пройдена';
-}
-
 // ═══════════════════════════════ MENU ═══════════════════════════════
 export class Menu3D {
   is3d = true;
@@ -108,7 +100,7 @@ export class Menu3D {
   town: MenuTown | null = null;
   guards: { rig: Rig<any>; root: THREE.Group; dir: number }[] = [];
   fx = new FX3();
-  mode: 'main' | 'settings' | 'controls' | 'chapters' | 'series' | 'confirm' = 'main';
+  mode: 'main' | 'settings' | 'controls' | 'chapters' | 'confirm' = 'main';
   main: MenuList;
   sub: MenuList | null = null;
   /** «Настройки» / «Управление»: the settings panel (its own tab) */
@@ -153,10 +145,9 @@ export class Menu3D {
   }
   buildMain() {
     if (prologueDone()) {
-      // after the prologue: the map of Хрумляндия first, the series list, a fresh start at the bottom
+      // after the prologue: the map of Хрумляндия first (every series is played from there), a fresh start at the bottom
       return new MenuList([
         { label: 'Карта Хрумляндии', action: () => game.toMap() },
-        { label: 'Серии', action: () => this.open('series') },
         { label: 'Играть с друзьями', action: () => this.coopLobby() },
         { label: 'Мой герой', action: () => this.customize() },
         { label: 'Управление', action: () => this.open('controls') },
@@ -197,33 +188,15 @@ export class Menu3D {
   }
   open(m: Menu3D['mode']) {
     this.mode = m;
-    const back = m === 'chapters' && prologueDone()
-      ? { label: 'Назад', action: () => this.open('series') }
-      : { label: 'Назад', action: () => { this.mode = 'main'; this.sub = null; } };
+    const back = { label: 'Назад', action: () => { this.mode = 'main'; this.sub = null; } };
     if (m === 'settings' || m === 'controls') {
       const tab: SettingsTab = m === 'controls' ? 'controls' : 'sound';
       this.sub = null;
       this.panel = new SettingsPanel({ tab, where: 'menu', onClose: () => { this.panel = null; this.mode = 'main'; } });
     } else if (m === 'chapters') {
-      const items = STORY.map((s, i) => ({ s, i })).filter(({ s, i }) => s.kind === 'level' && (i <= save.data.reached || prologueDone()));
+      const items = STORY.map((s, i) => ({ s, i })).filter(({ s, i }) => s.kind === 'level' && i <= save.data.reached);
       const medal = (id: string) => { const m = save.data.medals[id] ?? 0; return m ? '   ' + '★'.repeat(m) + '☆'.repeat(3 - m) : ''; };
       this.sub = new MenuList([...items.map(({ s, i }) => ({ label: (s as { title: string }).title + medal((s as { id: string }).id), action: () => game.story(i) })), back], W / 2, 170, { w: 560, h: 52, gap: 10, size: 22 });
-    } else if (m === 'series') {
-      // the prologue (opens its chapter list) and the series of the arc: medals, played / open / locked
-      const prog = myProgress();
-      const stars = (n: number) => '★'.repeat(n) + '☆'.repeat(3 - n);
-      const eps = episodeList().filter((e) => e.n >= 1);
-      const row = (e: Episode) => {
-        const st = epState(e, prog);
-        const medal = prog[e.id]?.medal ?? 0;
-        const tail = st === 'done' ? `   ${stars(medal)}` : st === 'locked' ? '   — закрыто' : '';
-        return {
-          label: `${e.n}. ${e.title}${tail}`,
-          action: () => (e.id === 'prologue' ? this.open('chapters') : playEpisode(e.id)),
-          disabled: () => st === 'locked',
-        };
-      };
-      this.sub = new MenuList([...eps.map(row), back], W / 2, 170, { w: 620, h: 52, gap: 10, size: 22 });
     } else if (m === 'confirm') {
       this.sub = new MenuList([
         { label: 'Да, начать заново', action: () => { save.reset(); game.story(0); } },
@@ -273,16 +246,10 @@ export class Menu3D {
     if (this.mode === 'main') {
       this.drawLogo(ctx);
       this.main.draw(ctx);
-      text(ctx, 'Пробел / Enter — выбрать   ↑ ↓ — листать', 230, 690, { size: 15, font: 'body', color: '#d8c8e8', align: 'center', alpha: 0.75 });
-      if (save.data.started) {
-        const step = STORY[save.data.story];
-        const where = prologueDone() ? `Карта Хрумляндии · ${seriesNow()}` : step?.kind === 'level' ? step.title : step?.kind === 'den' ? 'Берлога Вторника' : step?.kind === 'story' ? 'Заставка' : '';
-        text(ctx, `Сохранение: ${where}`, 230, 336, { size: 16, font: 'body', color: '#ffd34a', align: 'center', alpha: 0.85 });
-      }
     } else if (this.panel) this.panel.draw(ctx);
     else {
       ctx.fillStyle = 'rgba(12,6,16,0.72)'; ctx.fillRect(-2000, -2000, W + 4000, H + 4000);
-      const title = { settings: 'Настройки', controls: 'Управление', chapters: prologueDone() ? 'Пролог: главы' : 'Главы', series: 'Серии', confirm: 'Начать заново?', main: '' }[this.mode];
+      const title = { settings: 'Настройки', controls: 'Управление', chapters: 'Главы', confirm: 'Начать заново?', main: '' }[this.mode];
       text(ctx, title, W / 2, 110, { size: 52, color: '#ffd34a', align: 'center', stroke: 9 });
       if (this.mode === 'confirm') text(ctx, 'Весь прогресс, крошки и находки пропадут.', W / 2, 300, { size: 24, font: 'body', color: '#f6ecd2', align: 'center' });
       this.sub?.draw(ctx);
