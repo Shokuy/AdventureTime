@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>World kit preview</title>
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; background: #120b0d; overflow: hidden; font-family: system-ui, sans-serif; }
+      canvas { display: block; width: 100vw; height: 100vh; outline: none; }
+      #hud { position: fixed; left: 10px; top: 10px; color: #fbeedd; font-size: 12px; line-height: 1.45; background: rgba(20, 10, 8, 0.72); padding: 8px 10px; border-radius: 8px; pointer-events: none; white-space: pre; max-width: 46vw; }
+      #hud b { color: #ffcf6a; }
+    </style>
+  </head>
+  <body>
+    <canvas id="view" tabindex="0"></canvas>
+    <div id="hud">loading…</div>
+    <script type="module" src="/src/three/world/preview.ts"></script>
+  </body>
+</html>

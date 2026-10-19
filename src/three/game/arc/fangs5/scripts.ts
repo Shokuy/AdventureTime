@@ -1,0 +1,722 @@
+import * as THREE from 'three';
+import { audio } from '../../../../engine/audio';
+import { choose, ease, lerp, rand } from '../../../../engine/util';
+import { type Script, type Waiter, wait, tween, all, until } from '../../../../game/coroutine';
+import type { Level3D, Npc3 } from '../../level';
+import { net } from '../../../../net/session';
+import { vamp, ambient } from '../vampires';
+import { F5, type Line } from './lines';
+import { say, speakingNow, type SpeakerId } from './speech';
+import { Midnight3, ROOF, CANNON_AT, PASTILA_AT } from './boss';
+import { createSunCannon, type CannonRig } from './kingRig';
+import { createMouse, type MouseKind, type MouseAnim } from './rigs';
+import { discAt, landingSpot, SPOTS } from './level';
+import { Daybreak, Fade, ItemCard, ShadowGirl, createMirror, buildSquare, SQUARE, type Square } from './finale';
+import type { Rig } from '../../../models/rig';
+
+/*
+ * The scenes of «Замок Полночь» (docs/script-fangs.md §9) and the level's hook. Co-op: the host starts a scene and
+ * every machine plays it (lines advance by themselves); presentation (camera, the story cast, props) runs everywhere,
+ * world actions (the boss starting, the level's end) only where L.authority is true. «Сюжетный состав» (GDD §8): the
+ * four heroes of every scene are story NPCs on marks (castScenes hides the players' figures while the bars are down).
+ * Long scenes are split so none of them comes near the co-op watchdog (120 s): the ending and the letter are two.
+ */
+
+type CastKind = 'tosha' | 'bublik' | 'noki' | 'pastila';
+const CAST: CastKind[] = ['tosha', 'bublik', 'noki', 'pastila'];
+const V3 = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+
+// ───────────────────────── the story cast ─────────────────────────
+class Cast {
+  n: Record<CastKind, Npc3>;
+  constructor(private L: Level3D) {
+    this.n = {} as Record<CastKind, Npc3>;
+    for (const k of CAST) { const npc = L.npc(k, 0, -200, 0, 0); npc.root.visible = false; this.n[k] = npc; }
+    // Ноки has no shadow until the end (bible §1.7)
+    this.shadow('noki', false);
+  }
+  shadow(k: CastKind, on: boolean) { this.n[k].root.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).castShadow = on; }); }
+  at(k: CastKind, x: number, y: number, z: number, yaw: number, state = 'idle', expr = 'normal') {
+    const n = this.n[k];
+    n.root.position.set(x, y, z); n.root.rotation.y = yaw; n.root.visible = true;
+    n.anim.state = state; n.anim.expr = expr; n.anim.attack = null; n.anim.speed = 0;
+    return n;
+  }
+  face(k: CastKind, x: number, z: number) { const r = this.n[k].root; r.rotation.y = Math.atan2(x - r.position.x, z - r.position.z); }
+  hide(...ks: CastKind[]) { for (const k of ks.length ? ks : CAST) this.n[k].root.visible = false; }
+  /** walk a figure to (x, z) over `secs` */
+  walk(k: CastKind, x: number, z: number, secs: number): Waiter {
+    const n = this.n[k];
+    const from = n.root.position.clone();
+    n.root.rotation.y = Math.atan2(x - from.x, z - from.z);
+    n.anim.state = 'run'; n.anim.speed = 0.5;
+    return tween(secs, (q) => { n.root.position.x = lerp(from.x, x, q); n.root.position.z = lerp(from.z, z, q); if (q >= 1) { n.anim.state = 'idle'; n.anim.speed = 0; } });
+  }
+  head(k: CastKind, dy = 0.95) { return this.n[k].root.position.clone().setY(this.n[k].root.position.y + dy); }
+}
+
+interface Refs {
+  cast: Cast; boss: Midnight3; cannon: CannonRig; cart: CannonRig; day: Daybreak; fade: Fade; card: ItemCard; girl: ShadowGirl;
+  mice: { kind: MouseKind; rig: Rig<MouseAnim>; anim: MouseAnim; g: THREE.Group }[];
+  square: Square; mirror: THREE.Group; gateEyes: THREE.Group;
+}
+const R = (L: Level3D) => L.refs.f5 as Refs;
+
+/** a line, and its speaker's figure faces the camera a little (the mouth moves by speakingNow) */
+function line(L: Level3D, l: Line): Waiter { return say(L, l[0], l[1], l[2]); }
+function mine(L: Level3D, f: () => void) { ambient(L, f); }
+/** the camera to a spot looking at a point (instant cut by default) */
+const shot = (L: Level3D, from: THREE.Vector3, to: THREE.Vector3, d = 0) => L.shot(from, to, d);
+/** a face close-up of a cast figure: the camera in front of it (along its facing) */
+function faceShot(L: Level3D, k: CastKind, dist = 2.3, side = 0.6, d = 0) {
+  const c = R(L).cast.n[k].root;
+  const yaw = c.rotation.y;
+  const f = V3(Math.sin(yaw), 0, Math.cos(yaw)), s = V3(Math.cos(yaw), 0, -Math.sin(yaw));
+  const head = c.position.clone().setY(c.position.y + (k === 'bublik' ? 0.7 : 0.95));
+  return L.shot(head.clone().addScaledVector(f, dist).addScaledVector(s, side).setY(head.y + 0.25), head, d);
+}
+function endScene(L: Level3D, keep: CastKind[] = []) {
+  const r = R(L);
+  r.cast.hide(...(['tosha', 'bublik', 'noki', 'pastila'] as CastKind[]).filter((k) => !keep.includes(k)));
+}
+function finish(L: Level3D) { if (L.authority) L.endLevel(); }
+function exitStart(L: Level3D) { if (L.nl) { L.complete = true; L.exitWait = null; } }
+
+// ═════════════════════════════ the scenes ═════════════════════════════
+const scripts: Record<string, (L: Level3D) => Script> = {
+  // 9.1 — the bridge, the gate opens by itself
+  *fangs5_intro(L) {
+    const r = R(L), c = r.cast;
+    L.cutscene(true);
+    L.hud.showBanner(F5.banner, '#ff5a6a');
+    c.at('tosha', -0.9, 0, 72.4, Math.PI); c.at('bublik', 0.8, 0, 73, Math.PI, 'idle', 'scared'); c.at('noki', -1.9, 0, 71.2, Math.PI); c.at('pastila', 1.9, 0, 75.6, Math.PI);
+    r.cart.root.visible = true; r.cart.root.position.set(1.9, 0, 74); r.cart.root.rotation.y = Math.PI;
+    yield shot(L, V3(-17, 4, 106), V3(0, 18, 10));
+    yield all(shot(L, V3(-12, 3, 98), V3(0, 19, 6), 5), line(L, F5.intro[0]));
+    yield faceShot(L, 'bublik', 2.0, 0.5);
+    yield line(L, F5.intro[1]);
+    yield shot(L, V3(4.6, 1.6, 71.2), V3(1.9, 1, 74.6));
+    yield line(L, F5.intro[2]);
+    yield faceShot(L, 'noki', 2.3, -0.5);
+    yield line(L, F5.intro[3]);
+    yield faceShot(L, 'tosha', 2.2, 0.5);
+    c.n.tosha.anim.expr = 'angry';
+    yield line(L, F5.intro[4]);
+    // the gate opens by itself
+    yield shot(L, V3(0.4, 2.2, 64), V3(0, 3.2, 46));
+    mine(L, () => audio.sfx('door', { pitch: 0.5 }));
+    const g = L.refs.f5gate as { leaves: THREE.Group[]; col: { active?: boolean } };
+    yield all(tween(2.2, (k) => { g.leaves[0].rotation.y = -1.6 * ease.inOut(k); g.leaves[1].rotation.y = 1.6 * ease.inOut(k); }), wait(0.4));
+    g.col.active = false;
+    r.gateEyes.visible = true;
+    c.n.bublik.anim.expr = 'scared';
+    yield line(L, F5.intro[5]);
+    r.gateEyes.visible = false;
+    yield faceShot(L, 'bublik', 2.0, -0.4);
+    yield line(L, F5.intro[6]);
+    yield shot(L, V3(-0.5, 1.8, 77.5), V3(0, 2.5, 60));
+    c.n.noki.anim.expr = 'angry';
+    yield line(L, F5.intro[7]);
+    // the four walk to the gate; Пастила wheels the cannon in
+    const cart0 = r.cart.root.position.clone();
+    yield all(c.walk('tosha', -0.9, 60, 2.2), c.walk('bublik', 0.8, 60.6, 2.2), c.walk('noki', -1.9, 59, 2.1), c.walk('pastila', 1.9, 63, 2.2),
+      tween(2.2, (k) => { r.cart.root.position.z = lerp(cart0.z, 61.4, k); }));
+    r.cart.root.visible = false;
+    endScene(L);
+    yield L.camBack(0.7);
+    L.cutscene(false);
+    audio.playMusic('castle');
+  },
+
+  // 9.2.1 — Ноки's portrait
+  *fangs5_portraits(L) {
+    const c = R(L).cast;
+    L.cutscene(true);
+    c.at('noki', 5.5, 0, -6, Math.PI / 2); c.at('pastila', 4.3, 0, -4.3, Math.PI / 2 + 0.55, 'idle', 'surprised'); c.at('bublik', 4.2, 0, -7.8, Math.PI / 2 - 0.5); c.at('tosha', 3.0, 0, -5.8, Math.PI / 2);
+    yield shot(L, V3(3.8, 2.2, -7.3), V3(7.4, 3.9, -6));
+    yield shot(L, V3(4.6, 2.0, -7.0), V3(7.4, 4.1, -6), 2.5);
+    yield faceShot(L, 'pastila', 2.2, 0.4);
+    yield line(L, F5.portraits[0]);
+    c.n.noki.anim.expr = 'sad';
+    // her profile and the portrait together
+    yield shot(L, V3(5.4, 1.45, -9.4), V3(6.6, 1.45, -6));
+    yield line(L, F5.portraits[1]);
+    c.face('noki', 3.0, -5.8);
+    yield faceShot(L, 'bublik', 2.0, 0.4);
+    yield line(L, F5.portraits[2]);
+    c.n.noki.anim.expr = 'happy';
+    yield faceShot(L, 'noki', 2.3, 0.4);
+    yield line(L, F5.portraits[3]);
+    endScene(L);
+    yield L.camBack(0.6);
+    L.cutscene(false);
+  },
+
+  // 9.2.2 — the library (two lines)
+  *fangs5_library(L) {
+    const c = R(L).cast;
+    L.cutscene(true);
+    c.at('bublik', -0.8, 0, -40.2, Math.PI, 'idle', 'surprised'); c.at('tosha', 0.9, 0, -40.6, Math.PI, 'idle', 'surprised');
+    yield shot(L, V3(0.2, 2.0, -37.2), V3(-10, 4.5, -52));
+    yield shot(L, V3(0.4, 2.4, -37.6), V3(-12, 5, -50), 2.2);
+    c.face('bublik', 0.9, -40.6);
+    yield faceShot(L, 'bublik', 2.0, -0.5);
+    yield line(L, F5.library[0]);
+    c.n.tosha.anim.expr = 'angry';
+    yield faceShot(L, 'tosha', 2.2, 0.5);
+    yield line(L, F5.library[1]);
+    endScene(L);
+    yield L.camBack(0.5);
+    L.cutscene(false);
+  },
+
+  // 9.2.3 — the five little bats on the stairs
+  *fangs5_stairs(L) {
+    const r = R(L), c = r.cast;
+    L.cutscene(true);
+    const l = discAt(SPOTS.stairsLanding);
+    const at = (i: number, da: number) => { const d = discAt(i); const a = d.a + da; return V3(Math.sin(a) * 7.4, d.y, -86 + Math.cos(a) * 7.4); };
+    // the four on the landing, facing up the stairs
+    const fwd = (p: THREE.Vector3, d = 1) => Math.atan2(p.z + 86, -(p.x)) * d;
+    void fwd;
+    const up = at(SPOTS.stairsLanding + 2, 0);
+    const marks: [CastKind, number, number][] = [['tosha', 0.15, 0.6], ['bublik', 0.5, 0.2], ['noki', 0.7, -0.7], ['pastila', 1.0, 0.5]];
+    for (const [k, kk, da] of marks) { const p = landingSpot(SPOTS.stairsLanding, kk, da); c.at(k, p.x, l.y, p.z, Math.atan2(up.x - p.x, up.z - p.z)); }
+    // the mice on the next steps, wings spread
+    r.mice.forEach((m, i) => {
+      const p = at(SPOTS.stairsLanding + 1 + Math.floor(i / 2), (i % 2 ? 0.16 : -0.16) + (i === 4 ? 0.0 : 0));
+      m.g.position.set(p.x, p.y + 0.02 + (i === 4 ? 0.2 : 0), p.z);
+      m.g.rotation.y = Math.atan2(l.x - p.x, l.z - p.z);
+      m.g.visible = true;
+    });
+    const mid = r.mice[2].g.position.clone();
+    const lp = at(SPOTS.stairsLanding, 0);
+    // (from the open shaft, looking out at the steps: no disc in the way)
+    const fromShaft = (p: THREE.Vector3, k: number, dy: number) => { const dx = p.x, dz = p.z + 86, d = Math.hypot(dx, dz) || 1; return V3(dx / d * (d - k), p.y + dy, -86 + dz / d * (d - k)); };
+    yield shot(L, fromShaft(mid, 5.2, 1.4), mid.clone().setY(mid.y + 0.4));
+    for (let i = 0; i < 5; i++) {
+      const m = r.mice[i];
+      yield shot(L, fromShaft(m.g.position, 2.6, 0.7), m.g.position.clone().setY(m.g.position.y + 0.35), i ? 0.35 : 0);
+      yield line(L, F5.stairs[i]);
+    }
+    c.n.bublik.anim.expr = 'happy'; c.n.bublik.anim.state = 'cheer';
+    yield faceShot(L, 'bublik', 2.0, 0.4);
+    yield line(L, F5.stairs[5]);
+    c.n.bublik.anim.state = 'idle';
+    yield faceShot(L, 'noki', 2.3, -0.4);
+    yield line(L, F5.stairs[6]);
+    // they step over the mice; the mice squeak after them
+    yield shot(L, lp.clone().setY(l.y + 3.2).lerp(V3(0, l.y + 3.2, -86), 0.3), mid, 0.4);
+    for (const m of r.mice) m.anim.squeak = 1;
+    mine(L, () => { audio.sfx('batScreech', { pitch: 2.2, volume: 0.4 }); });
+    const tg = discAt(SPOTS.stairsLanding + 4);
+    yield all(...marks.map(([k], i) => c.walk(k, tg.x + Math.cos(i * 1.6) * 0.6, tg.z + Math.sin(i * 1.6) * 0.6, 1.6)),
+      tween(1.6, (k) => { for (const m of r.mice) m.anim.hop = k; }));
+    yield wait(0.5);
+    endScene(L);
+    // (the mice flutter off up the shaft)
+    L.runGen((function* () {
+      const p0 = r.mice.map((m) => m.g.position.clone());
+      yield tween(2.5, (k) => r.mice.forEach((m, i) => { m.g.position.set(p0[i].x * (1 - k * 0.8), p0[i].y + k * 9 + Math.sin(k * 9 + i) * 0.4, -86 + (p0[i].z + 86) * (1 - k * 0.8)); }));
+      for (const m of r.mice) m.g.visible = false;
+    })());
+    yield L.camBack(0.5);
+    L.cutscene(false);
+  },
+
+  // 9.3 — the roof under the moon
+  *fangs5_boss_intro(L) {
+    const r = R(L), c = r.cast, boss = r.boss;
+    L.cutscene(true);
+    if (L.authority) { const i = L.checkpoints.findIndex((k) => k.pos.y > ROOF.y - 1); if (i >= 0) L.lightCandle(i); }
+    boss.manual = true;
+    kingOnMerlon(boss);
+    audio.playMusic('tension');
+    c.at('tosha', -1, ROOF.y, -104.6, Math.PI); c.at('bublik', 1.2, ROOF.y, -105.1, Math.PI); c.at('noki', -2.8, ROOF.y, -105.6, Math.PI); c.at('pastila', PASTILA_AT.x, ROOF.y, PASTILA_AT.z, Math.PI);
+    yield shot(L, V3(0.6, ROOF.y + 0.9, -100.4), V3(0, ROOF.y + 5.4, -135));
+    yield shot(L, V3(0.4, ROOF.y + 1.2, -102), V3(0, ROOF.y + 5.2, -135), 2.5);
+    yield kingLine(L, F5.bossIntro[0]);
+    c.n.noki.anim.expr = 'angry';
+    yield faceShot(L, 'noki', 2.4, -0.4);
+    yield line(L, F5.bossIntro[1]);
+    yield shot(L, V3(0.3, ROOF.y + 3.6, -130.6), V3(0, ROOF.y + 4.4, -135.6));
+    yield kingLine(L, F5.bossIntro[2]);
+    // he straightens the cloak — the girl with the guitar shows in its folds
+    yield shot(L, V3(1.1, ROOF.y + 3.0, -131.4), V3(0, ROOF.y + 3.0, -135.9), 0.5);
+    boss.anim.st = 'talk';
+    yield tween(1.8, (k) => { (boss.rig.girl as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>).material.opacity = Math.sin(k * Math.PI) * 0.9; boss.rig.update(0.016, boss.anim); });
+    boss.anim.st = 'idle';
+    c.n.tosha.anim.expr = 'angry';
+    yield faceShot(L, 'tosha', 2.3, 0.4);
+    yield line(L, F5.bossIntro[3]);
+    yield shot(L, V3(0.4, ROOF.y + 3.6, -130.8), V3(0, ROOF.y + 4.4, -135.6));
+    yield kingLine(L, F5.bossIntro[4]);
+    c.n.bublik.anim.expr = 'sad';
+    yield faceShot(L, 'bublik', 2.0, 0.4);
+    yield line(L, F5.bossIntro[5]);
+    yield shot(L, V3(-0.6, ROOF.y + 3.4, -130.4), V3(0, ROOF.y + 4.3, -135.6));
+    yield kingLine(L, F5.bossIntro[6]);
+    yield faceShot(L, 'pastila', 2.3, -0.3);
+    yield line(L, F5.bossIntro[7]);
+    yield shot(L, V3(0, ROOF.y + 1.6, -112), V3(0, ROOF.y + 3.4, -134));
+    yield kingLine(L, F5.bossIntro[8]);
+    // down from the merlon, the shadow sword out
+    mine(L, () => audio.sfx('whoosh', { pitch: 0.5 }));
+    const from = boss.root.position.clone();
+    yield tween(0.9, (k) => { boss.root.position.lerpVectors(from, V3(0, ROOF.y, -130), k); boss.root.position.y += Math.sin(k * Math.PI) * 2.5; boss.anim.st = 'fly'; boss.rig.update(0.016, boss.anim); });
+    mine(L, () => { audio.sfx('bigSlam', { volume: 0.6 }); L.tcam.shake(0.5); L.fx.dust(V3(0, ROOF.y, -130), 20, '#8a7ab0'); });
+    boss.main.pos.set(0, ROOF.y, -130); boss.main.yaw = 0;
+    startFight(L);
+    endScene(L, ['pastila']);
+    c.at('pastila', PASTILA_AT.x, ROOF.y, PASTILA_AT.z, Math.PI);
+    yield L.camBack(0.7);
+    L.cutscene(false);
+    L.toast(F5.bossIntroToast);
+    audio.playMusic('vampire_boss');
+    if (L.authority) boss.start();
+  },
+
+  // after a restart (solo respawn / co-op team wipe)
+  *fangs5_boss_retry(L) {
+    const r = R(L), boss = r.boss;
+    L.cutscene(true);
+    boss.manual = true;
+    kingOnMerlon(boss);
+    yield shot(L, V3(0.3, ROOF.y + 3.6, -130.6), V3(0, ROOF.y + 4.4, -135.6));
+    yield wait(0.3);
+    yield kingLine(L, ['polnoch', F5.retry]);
+    boss.main.pos.set(0, ROOF.y, -130); boss.main.yaw = 0;
+    startFight(L);
+    r.cast.at('pastila', PASTILA_AT.x, ROOF.y, PASTILA_AT.z, Math.PI);
+    yield L.camBack(0.6);
+    L.cutscene(false);
+    audio.playMusic('vampire_boss');
+    if (L.authority) boss.start();
+  },
+
+  // 9.5 — the last strike (the host starts it when the solar shot has burnt his cloak)
+  *fangs5_boss_defeat(L) {
+    const r = R(L), c = r.cast, boss = r.boss, V = vamp(L);
+    L.cutscene(true);
+    L.hud.bossMax = 0;
+    boss.manual = true;
+    audio.stopMusic(1.2);
+    // the giant falls in on itself: the King, burning, on the north of the roof
+    yield shot(L, V3(0, ROOF.y + 2.5, -100), V3(0, ROOF.y + 13, -142));
+    yield wait(0.8);
+    boss.root.visible = true; boss.rig.root.visible = true;
+    boss.root.position.set(0, ROOF.y + 6, -134); boss.root.rotation.y = 0;
+    boss.anim.st = 'stagger'; boss.anim.burn = 1; boss.anim.sword = 0;
+    yield tween(1.8, (k) => { boss.fadeK = k; boss.root.scale.setScalar(lerp(4, 1, k)); boss.root.position.set(0, lerp(ROOF.y + 6, ROOF.y, k), lerp(-134, -126, k)); boss.rig.update(0.016, boss.anim); });
+    boss.root.scale.setScalar(1);
+    yield shot(L, V3(1.2, ROOF.y + 2.2, -119), V3(0, ROOF.y + 1.6, -126), 0.5);
+    yield wait(0.6);
+    // Ноки leaps from a merlon with the axe-guitar up
+    const n = c.at('noki', -12.6, ROOF.y + 1.9, -112, Math.atan2(12.6, -14), 'jump', 'angry');
+    n.anim.attack = { kind: 'axe', p: 0.1 };
+    yield shot(L, V3(-4, ROOF.y + 0.6, -110), V3(-9, ROOF.y + 4.5, -118));
+    const p0 = n.root.position.clone(), p1 = V3(-0.4, ROOF.y, -123.6);
+    yield all(line(L, F5.defeat[0]), tween(1.4, (k) => { n.root.position.lerpVectors(p0, p1, k); n.root.position.y += Math.sin(k * Math.PI) * 4.5; n.anim.state = k < 0.95 ? 'jump' : 'idle'; n.anim.attack = { kind: k < 0.85 ? 'axe' : 'chord', p: k < 0.85 ? 0.15 : (k - 0.85) / 0.15 }; }));
+    // ДЗЫНЬ! — a wave of sound and light; the moon pales
+    mine(L, () => {
+      audio.sfx('clang', { pitch: 1.4 }); audio.sfx('victory', { volume: 0.6 }); audio.sfx('bigSlam', { volume: 0.5 });
+      L.fx.ring(p1.clone().setY(ROOF.y + 0.3), 18, '#c070ff', 0.9); L.fx.ring(p1.clone().setY(ROOF.y + 1.2), 12, '#ffe08a', 0.7, false);
+      L.fx.stars(p1.clone().setY(ROOF.y + 1.5), 60, ['#c070ff', '#ff7ad0', '#ffffff', '#ffe14a']);
+    });
+    L.whiteFlash = 0.9; L.tcam.shake(1.2); L.hitstop(0.3);
+    n.anim.attack = null; n.anim.state = 'idle';
+    V.moonCtl?.set(0, 3); V.night?.set(0, 3);
+    boss.anim.st = 'kneel';
+    yield shot(L, V3(0.8, ROOF.y + 2.0, -121.2), V3(0, ROOF.y + 1.7, -126), 0.6);
+    yield kingLine(L, F5.defeat[1]);
+    yield kingLine(L, F5.defeat[2]);
+    // he crumbles into shadow; the cloak bursts into a hundred shadows flying home
+    yield shot(L, V3(0, ROOF.y + 4, -112), V3(0, ROOF.y + 6, -130), 0.6);
+    const shadows: { m: THREE.Mesh; v: THREE.Vector3 }[] = [];
+    const sm = new THREE.MeshBasicMaterial({ map: (boss.rig.girl as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>).material.map, transparent: true, depthWrite: false, color: '#20103a', side: THREE.DoubleSide });
+    for (let i = 0; i < 70; i++) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.9), sm);
+      m.position.set(rand(-0.6, 0.6), ROOF.y + rand(0.5, 2.5), -126 + rand(-0.6, 0.6));
+      L.scene.add(m);
+      const a = rand(0, Math.PI * 2);
+      shadows.push({ m, v: V3(Math.cos(a) * rand(4, 12), rand(3, 10), Math.sin(a) * rand(4, 12)) });
+    }
+    mine(L, () => { audio.sfx('mist', { pitch: 0.6 }); audio.sfx('batScreech', { pitch: 0.7, volume: 0.4 }); });
+    yield tween(2.6, (k) => {
+      boss.rig.root.scale.setScalar(Math.max(0.01, 1 - k));
+      for (const s of shadows) { s.m.position.addScaledVector(s.v, 0.016); s.m.lookAt(L.tcam.cam.position); sm.opacity = 1 - k * 0.7; }
+      if (Math.random() < 0.5) L.fx.emit(V3(rand(-0.8, 0.8), ROOF.y + rand(0.3, 2.4), -126 + rand(-0.6, 0.6)), { count: 3, speed: [0.5, 2], life: [0.6, 1.2], size: [0.3, 0.6], colors: ['#1a1028', '#3a2a5a'], g: -1, drag: 1 });
+    });
+    for (const s of shadows) s.m.removeFromParent();
+    boss.root.visible = false; boss.giant.root.visible = false;
+    // the land gets its colours back
+    if (L.authority) for (const z of V.zones) V.restoreZone(z.id);
+    if (L.authority) V.restoreAround([0, 0, 22], 40, null);
+    // (the next scene — Ноки's shadow — follows straight on: the host starts it)
+  },
+
+  // 9.6 — Ноки's shadow
+  *fangs5_shadow(L) {
+    const r = R(L), c = r.cast;
+    L.cutscene(true);
+    r.day.go('dawn', 7);
+    const V = vamp(L);
+    V.moonCtl?.set(0, 1);
+    const nk = c.at('noki', 0, ROOF.y, -114, Math.PI / 2);
+    c.at('bublik', -1.8, ROOF.y, -112.4, Math.PI / 2 + 0.7); c.at('tosha', -1.7, ROOF.y, -115.8, Math.PI / 2 - 0.6); c.at('pastila', 1.7, ROOF.y, -112.6, -Math.PI / 2 - 0.9);
+    r.cast.shadow('noki', false);
+    // a little shadow — the girl with the guitar — circles over the roof and comes down to Ноки's feet
+    const g = r.girl;
+    g.fly.visible = true;
+    (g.fly.material as THREE.MeshBasicMaterial).opacity = 0;
+    yield shot(L, V3(-3.5, ROOF.y + 1.6, -108), V3(0, ROOF.y + 5, -120));
+    const c0 = V3(0, ROOF.y + 7, -122);
+    yield tween(3.4, (k) => {
+      const a = k * Math.PI * 2.4;
+      const rr = lerp(6, 0.4, k);
+      g.fly.position.set(c0.x + Math.cos(a) * rr, lerp(c0.y, ROOF.y + 0.9, ease.inOut(k)), lerp(c0.z, -114, k) + Math.sin(a) * rr);
+      g.fly.lookAt(L.tcam.cam.position);
+      (g.fly.material as THREE.MeshBasicMaterial).opacity = Math.min(1, k * 4) * (1 - Math.max(0, k - 0.85) / 0.15);
+    }, (k) => k);
+    g.fly.visible = false;
+    g.ground.visible = true;
+    g.ground.position.set(nk.root.position.x, ROOF.y + 0.03, nk.root.position.z);
+    g.ground.rotation.y = Math.PI / 2;
+    yield tween(0.8, (k) => { (g.ground.material as THREE.MeshBasicMaterial).opacity = 0.75 * k; });
+    r.cast.shadow('noki', true);
+    mine(L, () => audio.sfx('colorRestore', { pitch: 1.3, volume: 0.6 }));
+    c.n.bublik.anim.expr = 'surprised';
+    yield shot(L, V3(-1.4, ROOF.y + 1.9, -111.8), V3(-0.7, ROOF.y + 0.2, -114));
+    yield line(L, F5.shadow[0]);
+    // Пастила holds out a little mirror
+    const mirror = r.mirror;
+    mirror.visible = true;
+    mirror.position.copy(c.n.pastila.root.position).add(V3(-0.3, 1.0, -0.2));
+    mirror.lookAt(nk.root.position.clone().setY(ROOF.y + 1.2));
+    yield faceShot(L, 'pastila', 2.2, 0.5);
+    yield line(L, F5.shadow[1]);
+    const mp = V3(0.62, ROOF.y + 1.18, -114.05);
+    const m0 = mirror.position.clone();
+    yield tween(0.8, (k) => { mirror.position.lerpVectors(m0, mp, ease.inOut(k)); mirror.lookAt(V3(0, ROOF.y + 1.2, -114)); });
+    // over her shoulder: the reflection. A long pause.
+    c.n.noki.anim.expr = 'surprised';
+    yield shot(L, V3(-0.55, ROOF.y + 1.42, -113.75), mp.clone().setY(mp.y + 0.02), 0.8);
+    yield wait(2.2);
+    c.n.noki.anim.expr = 'sad';
+    yield line(L, F5.shadow[2]);
+    yield line(L, F5.shadow[3]);
+    mirror.visible = false;
+    c.n.tosha.anim.expr = 'happy';
+    yield faceShot(L, 'tosha', 2.2, 0.4);
+    yield line(L, F5.shadow[4]);
+    c.n.noki.anim.expr = 'happy';
+    yield faceShot(L, 'noki', 2.4, -0.4);
+    yield line(L, F5.shadow[5]);
+    yield faceShot(L, 'bublik', 2.1, 0.4);
+    c.n.bublik.anim.expr = 'happy';
+    yield line(L, F5.shadow[6]);
+    // the sun comes up; Ноки squints but doesn't hide
+    yield shot(L, V3(-3.2, ROOF.y + 1.6, -116.2), V3(6, ROOF.y + 2.2, -112), 1.2);
+    r.day.go('day', 5);
+    c.n.noki.anim.expr = 'sleepy';
+    yield line(L, F5.shadow[7]);
+    c.n.noki.anim.expr = 'happy';
+    L.hud.showBanner(F5.shadowBanner, '#ffd34a');
+    mine(L, () => audio.sfx('victory', { volume: 0.6 }));
+    yield wait(1.6);
+    endScene(L);
+    V.moonCtl?.dispose(); V.moonCtl = null;
+    openExit(L);
+    yield L.camBack(0.7);
+    L.cutscene(false);
+    L.toast(F5.afterToast);
+    audio.playMusic('hub_day');
+  },
+
+  // 9.7 — the morning square (the team walked to the roof door)
+  *exit_fangs5_castle(L) {
+    const r = R(L), c = r.cast, S = r.square;
+    exitStart(L);
+    L.cutscene(true);
+    yield r.fade.out(0.8);
+    r.day.go('day', 0);
+    // my hero (hidden) waits at the square, so the sun's shadows are drawn there
+    const slot = L.nl ? Math.max(0, [...net.members.keys()].sort().indexOf(net.myId)) : 0;
+    L.teleportMe(V3(SQUARE.x - 8 + slot * 1.3, 0.05, SQUARE.z + 12), Math.PI);
+    for (const k of ['tosha', 'bublik', 'noki', 'pastila'] as CastKind[]) { const m = S.marks[k]; c.at(k, m.x, 0, m.z, Math.atan2(S.table.x - m.x, S.table.z - m.z), 'idle', 'happy'); }
+    r.cast.shadow('noki', true);
+    const bear = L.npcs.bear;
+    if (bear) { bear.root.visible = true; bear.root.position.copy(S.marks.bear); bear.root.rotation.y = Math.atan2(S.table.x - S.marks.bear.x, S.table.z - S.marks.bear.z); bear.anim.state = 'stand'; }
+    S.folk.ponchik.g.visible = false;
+    yield shot(L, V3(SQUARE.x + 2, 6, SQUARE.z - 11), V3(SQUARE.x, 1.2, SQUARE.z + 4));
+    yield r.fade.in(1.0);
+    yield all(shot(L, V3(SQUARE.x + 1, 4.4, SQUARE.z - 7), V3(SQUARE.x, 1.3, SQUARE.z + 4), 4), line(L, F5.ending[0]));
+    const fshot = (f: { g: THREE.Group }, side = 0.4) => { const p = f.g.position, y = f.g.rotation.y; return shot(L, V3(p.x + Math.sin(y) * 2.6 + Math.cos(y) * side, 1.5, p.z + Math.cos(y) * 2.6 - Math.sin(y) * side), p.clone().setY(1.0)); };
+    yield fshot(S.folk.zefirych);
+    S.folk.zefirych.anim.state = 'wave';
+    yield line(L, F5.ending[1]);
+    S.folk.zefirych.anim.state = 'idle';
+    yield fshot(S.folk.beze, -0.4);
+    S.folk.beze.anim.state = 'cheer';
+    yield line(L, F5.ending[2]);
+    S.folk.beze.anim.state = 'idle';
+    if (bear) { const p = bear.root.position; yield shot(L, V3(p.x + 1.5, 2.2, p.z + 3.4), p.clone().setY(1.6)); bear.anim.talk = 0; }
+    yield line(L, F5.ending[3]);
+    yield faceShot(L, 'bublik', 2.2, 0.3);
+    yield line(L, F5.ending[4]);
+    yield faceShot(L, 'tosha', 2.3, -0.3);
+    yield line(L, F5.ending[5]);
+    if (bear) { const p = bear.root.position; yield shot(L, V3(p.x + 1.5, 2.2, p.z + 3.4), p.clone().setY(1.6)); }
+    yield line(L, F5.ending[6]);
+    c.n.tosha.anim.state = 'cheer';
+    yield faceShot(L, 'tosha', 2.3, 0.3);
+    yield line(L, F5.ending[7]);
+    c.n.tosha.anim.state = 'idle';
+    yield faceShot(L, 'pastila', 2.3, 0.3);
+    yield line(L, F5.ending[8]);
+    yield faceShot(L, 'bublik', 2.0, -0.3);
+    c.n.bublik.anim.expr = 'happy';
+    yield line(L, F5.ending[9]);
+    // Пончик runs in with a yellow envelope; it steams sourly
+    const P = S.folk.ponchik;
+    P.g.visible = true;
+    P.g.position.copy(S.ponchikFrom);
+    S.letter.visible = true;
+    yield shot(L, V3(SQUARE.x + 7, 2.4, SQUARE.z + 12), V3(SQUARE.x + 9, 1.2, SQUARE.z + 14));
+    const to = V3(SQUARE.x + 4.5, 0, SQUARE.z + 7);
+    P.anim.state = 'walk'; P.anim.speed = 1;
+    P.g.rotation.y = Math.atan2(to.x - P.g.position.x, to.z - P.g.position.z);
+    const from = P.g.position.clone();
+    yield tween(2.0, (k) => {
+      P.g.position.lerpVectors(from, to, k);
+      S.letter.position.copy(P.g.position).add(V3(0.4, 0.9, 0.2));
+      if (Math.random() < 0.4) L.fx.emit(S.letter.position.clone().setY(S.letter.position.y + 0.3), { count: 1, speed: [0.3, 0.8], dir: V3(0, 1, 0), spread: 0.3, life: [0.6, 1.1], size: [0.15, 0.3], size2: 2, colors: ['#d8f040', '#b8d820', '#f4ff8a'], g: -1.2, drag: 1 });
+    });
+    P.anim.state = 'talk'; P.anim.speed = 0;
+    P.g.rotation.y = Math.atan2(S.table.x - to.x, S.table.z - to.z);
+    yield shot(L, V3(to.x - 0.6, 1.6, to.z + 2.6), to.clone().setY(0.9));
+    yield line(L, F5.ending[10]);
+    P.anim.state = 'idle';
+    yield faceShot(L, 'noki', 2.3, 0.3);
+    // the letter is a scene of its own (the scene watchdog): the host starts it right after this one
+    if (L.authority) L.runGen((function* () { yield wait(0.1); yield until(() => !L.storyOn()); L.run('exit_fangs5_letter'); })());
+    yield line(L, F5.ending[11]);
+  },
+
+  // 9.8 — Граф Кислоплюй's letter (the teaser); then the episode is over
+  *exit_fangs5_letter(L) {
+    const r = R(L), c = r.cast, S = r.square;
+    exitStart(L);
+    L.cutscene(true);
+    const pa = c.n.pastila.root;
+    S.letter.visible = true;
+    S.letter.position.copy(pa.position).add(V3(0, 1.15, 0)).addScaledVector(V3(Math.sin(pa.rotation.y), 0, Math.cos(pa.rotation.y)), 0.45);
+    S.letter.rotation.y = pa.rotation.y;
+    r.card.show(F5.card.title, F5.card.text, 3.6);
+    mine(L, () => audio.sfx('artifact', { pitch: 0.8 }));
+    yield shot(L, S.letter.position.clone().add(V3(Math.sin(pa.rotation.y) * 1.1, 0.25, Math.cos(pa.rotation.y) * 1.1)), S.letter.position.clone());
+    for (let i = 0; i < 3; i++) yield line(L, F5.letter[i]);
+    // «…ваша пастила — приторная»: Пастила close
+    c.n.pastila.anim.expr = 'angry';
+    yield faceShot(L, 'pastila', 1.6, 0.2);
+    yield line(L, F5.letter[3]);
+    yield line(L, F5.letter[4]);
+    S.letter.visible = false;
+    yield faceShot(L, 'bublik', 2.0, 0.3);
+    c.n.bublik.anim.expr = 'scared';
+    yield line(L, F5.letter[5]);
+    c.n.tosha.anim.state = 'cheer';
+    yield faceShot(L, 'tosha', 2.3, -0.3);
+    yield line(L, F5.letter[6]);
+    yield faceShot(L, 'noki', 2.3, 0.3);
+    yield line(L, F5.letter[7]);
+    yield all(shot(L, V3(SQUARE.x + 1, 9, SQUARE.z - 16), V3(SQUARE.x, 1.6, SQUARE.z + 4), 3), line(L, F5.letter[8]));
+    L.toast(F5.letterToast);
+    yield wait(1.2);
+    finish(L);
+  },
+};
+
+// ───────────────────────── helpers of the boss scenes ─────────────────────────
+function kingOnMerlon(boss: Midnight3) {
+  boss.root.visible = true; boss.rig.root.visible = true;
+  boss.root.position.set(0, ROOF.y + 2.2, ROOF.z - 17.6);
+  boss.root.rotation.y = 0; boss.root.scale.setScalar(1);
+  boss.anim.st = 'idle'; boss.anim.sword = 1; boss.anim.wings = 0;
+  boss.rig.update(0.016, boss.anim);
+}
+/** a line of the King: his mouth moves while it types */
+function kingLine(L: Level3D, l: Line): Waiter {
+  const boss = R(L).boss;
+  boss.talkT = 0.4 + l[1].length * 0.045;
+  return line(L, l);
+}
+/** the fight's camera and the boss bar (every machine) */
+function startFight(L: Level3D) {
+  const boss = R(L).boss;
+  boss.manual = false;
+  L.boss = boss;
+  L.camModeDefault = 'boss';
+  L.tcam.bossPoint = boss.focusPt;
+}
+function openExit(L: Level3D) {
+  L.exit(-2.2, ROOF.y - 1, -100.2, 2.2, ROOF.y + 4, -95.6);
+  L.refs.f5after = true;
+}
+
+// ═════════════════════════════ the level's hook (every build, every machine) ═════════════════════════════
+const special: Record<string, (L: Level3D) => void> = {
+  fangs5_castle(L) {
+    const cast = new Cast(L);
+    const cannon = createSunCannon();
+    cannon.root.position.copy(CANNON_AT); cannon.root.rotation.y = Math.PI + 0.25;
+    L.scene.add(cannon.root);
+    const cart = createSunCannon();
+    cart.root.visible = false; cart.root.scale.setScalar(0.85);
+    L.scene.add(cart.root);
+    const boss = new Midnight3(L, {
+      pastila: () => cast.n.pastila,
+      cannon,
+      bell: L.refs.f5bell as THREE.Object3D,
+      lanterns: () => (L.refs.f5roofLanterns as { lit: boolean; snuff(): void }[]) ?? [],
+    });
+    boss.manual = true;
+    kingOnMerlon(boss);
+    // the five little bats of the stairs
+    const mice = (['netopyr', 'morok', 'shepot', 'nochka', 'tenka'] as MouseKind[]).map((kind) => {
+      const rig = createMouse(kind);
+      const g = new THREE.Group(); g.add(rig.root); g.visible = false; g.scale.setScalar(1.6);
+      L.scene.add(g);
+      return { kind, rig, anim: { talk: 0, hop: 0, squeak: 0 } as MouseAnim, g };
+    });
+    // red eyes in the dark of the gate (the King's voice in the intro)
+    const gateEyes = new THREE.Group();
+    for (const s of [-1, 1]) { const e = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 6), new THREE.MeshBasicMaterial({ color: '#ff2030' })); e.position.set(s * 0.32, 0, 0); e.scale.set(1.4, 0.5, 0.4); gateEyes.add(e); }
+    gateEyes.position.set(0, 3.4, 42); gateEyes.visible = false;
+    L.scene.add(gateEyes);
+    const mirror = createMirror(); mirror.visible = false; L.scene.add(mirror);
+    const square = buildSquare(L);
+    L.npc('bear', SQUARE.x - 5.6, 0, SQUARE.z + 2.4, 0).root.visible = false;
+    const refs: Refs = { cast, boss, cannon, cart, day: new Daybreak(L), fade: new Fade(L), card: new ItemCard(L), girl: new ShadowGirl(L), mice, square, mirror, gateEyes };
+    L.refs.f5 = refs;
+    L.refs.f5boss = boss;
+    // the boss draws (and waits) before his fight too
+    L.actors.push({ update: (L2, dt) => { if (L2.boss !== boss) boss.update(L2, dt); } });
+    // the host decides the victory; every machine plays the two scenes after it
+    boss.onDefeat = () => {
+      if (!L.authority) return;
+      L.runGen((function* () {
+        yield wait(0.6);
+        yield until(() => !L.storyOn());
+        L.run('fangs5_boss_defeat');
+        yield wait(0.2);
+        yield until(() => !L.storyOn());
+        L.run('fangs5_shadow');
+      })());
+    };
+    // the way on: story triggers appear as each part is done; the goal arrow points at what is left to do
+    const flow = flowActor(L);
+    L.actors.push(flow);
+    // speakers' mouths: the cast and the mice
+    L.updaters.push((_t, dt) => {
+      const id = speakingNow(L) as SpeakerId | null;
+      if (id && (CAST as string[]).includes(id)) cast.n[id as CastKind].talk = 0.35;
+      for (const m of mice) {
+        m.anim.talk = id === m.kind ? Math.abs(Math.sin(L.t * 16)) : 0;
+        m.anim.squeak = Math.max(0, m.anim.squeak - dt * 0.4);
+        if (m.g.visible) m.rig.update(dt, m.anim);
+      }
+    });
+    // portraits murmur as you pass (each machine for its own hero)
+    let murmur = 4;
+    L.updaters.push((_t, dt) => {
+      const p = L.player;
+      if (L.letterbox > 0.1 || p.pos.z > 3 || p.pos.z < -34 || p.pos.y > 4) return;
+      murmur -= dt;
+      if (murmur > 0) return;
+      murmur = rand(5, 8);
+      const roots = L.scene.children.filter((o) => (o as THREE.Object3D & { isPortrait?: boolean }).isPortrait);
+      void roots;
+      const at = new THREE.Object3D();
+      at.position.set(p.pos.x > 0 ? 7 : -7, 4.6, p.pos.z + rand(-4, 4));
+      L.scene.add(at);
+      L.bark(at, choose(F5.portraitBarks), 2.2, 0);
+      L.runGen((function* () { yield wait(2.4); at.removeFromParent(); })());
+    });
+    // a restart after the fight began: the host plays the retry for everyone once all are in
+    if (L.seen.has('fangs5_shadow')) afterVictory(L);
+    // (a restart after the fight began: flowActor plays the retry once a hero is back on the roof)
+  },
+};
+
+/** rebuilt after the King (a co-op late loader / a restart at dawn): no King, morning, the door open */
+function afterVictory(L: Level3D) {
+  const r = R(L);
+  r.boss.state = 'dead';
+  r.boss.root.visible = false; r.boss.giant.root.visible = false;
+  r.boss.manual = true;
+  r.day.go('day', 0);
+  const V = vamp(L);
+  V.moonCtl?.dispose(); V.moonCtl = null;
+  r.cast.hide();
+  openExit(L);
+}
+
+/** story triggers in order, the goal arrow, the library's bars */
+function flowActor(L: Level3D) {
+  const added = new Set<string>();
+  const addTrig = (id: string, box: [number, number, number, number, number, number]) => {
+    if (added.has(id)) return;
+    added.add(id);
+    L.trigger(...box, id);
+  };
+  const bars = L.refs.f5libBars as { bars: THREE.Group; col: { active?: boolean } };
+  let retried = false;
+  let barsK = 0;
+  const hint = new THREE.Vector3();
+  return {
+    update(L2: Level3D, dt: number) {
+      const siege = L2.refs.f5siege as { won: boolean } | undefined;
+      const candles = L2.refs.f5candles as { solved: boolean; n: number } | undefined;
+      const arena = L2.arenas[0];
+      if (siege?.won) addTrig('fangs5_portraits', [-7.5, -1, -8.5, 7.5, 4, -3.5]);
+      if (candles?.solved) addTrig('fangs5_library', [-3, -1, -42, 3, 4, -37.6]);
+      const libDone = arena && arena.state === 'done';
+      if (libDone) {
+        barsK = Math.min(1, barsK + dt / 1.5);
+        const l = discAt(SPOTS.stairsLanding);
+        addTrig('fangs5_stairs', [l.x - 2.6, l.y - 0.6, l.z - 2.6, l.x + 2.6, l.y + 2.6, l.z + 2.6]);
+      }
+      bars.bars.position.y = barsK * 4.6;
+      bars.col.active = barsK < 0.5;
+      if (L2.seen.has('fangs5_stairs')) addTrig('fangs5_boss_intro', [-4, ROOF.y - 1, -104.8, 4, ROOF.y + 3, -99.2]);
+      // after a restart (solo respawn / co-op team wipe) once the fight had begun: the host plays the retry as soon as
+      // everyone is in and a hero stands on the roof; a client that loads into a running fight takes it up at once
+      const r = R(L2);
+      if (r && L2.seen.has('fangs5_boss_intro') && !L2.seen.has('fangs5_shadow') && L2.boss !== r.boss && !L2.storyOn()) {
+        if (L2.authority) {
+          const onRoof = L2.alivePlayers().some((h) => h.pos.y > ROOF.y - 1 && h.pos.z < -99);
+          if (!retried && onRoof && !(L2.nl && L2.nl.waiting)) { retried = true; L2.run('fangs5_boss_retry'); }
+        } else if (r.boss.state === 'fight' || r.boss.state === 'transform' || r.boss.state === 'shadow') {
+          startFight(L2);
+          r.cast.at('pastila', PASTILA_AT.x, ROOF.y, PASTILA_AT.z, Math.PI);
+        }
+      }
+      // the arrow: the next unlit lantern / candle, the ambush, the tower top
+      const p = L2.player.pos;
+      let goal: THREE.Vector3 | null = null;
+      const V = vamp(L2);
+      if (siege && !siege.won) {
+        let bd = Infinity;
+        for (const ln of V.lanterns) if (!ln.lit && ln.pos.z > 0 && ln.pos.distanceTo(p) < bd) { bd = ln.pos.distanceTo(p); goal = hint.copy(ln.pos); }
+      } else if (candles && !candles.solved && L2.seen.has('fangs5_portraits')) {
+        const at = [[-6.2, -18], [6.2, -18], [-6.2, -26], [6.2, -26]][candles.n];
+        if (at) goal = hint.set(at[0], 0, at[1]);
+      } else if (arena && arena.state !== 'done' && L2.seen.has('fangs5_library')) goal = hint.copy(arena.center);
+      L2.refs.goalHint = goal ?? undefined;
+    },
+  };
+}
+
+export const F5_SCRIPTS = { scripts, special };
+void PASTILA_AT;

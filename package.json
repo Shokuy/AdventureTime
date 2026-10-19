@@ -1,0 +1,23 @@
+{
+  "name": "gromadnoe-korolevstvo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5173",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/three": "^0.186.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  },
+  "dependencies": {
+    "@fontsource/pangolin": "^5.3.0",
+    "@fontsource/rubik": "^5.3.0",
+    "@supabase/supabase-js": "^2.118.0",
+    "three": "^0.186.1"
+  }
+}

@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Artifacts Preview</title>
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; background: #1c1420; overflow: hidden; font: 12px/1.3 system-ui, sans-serif; color: #f3e9dc; }
+      canvas { display: block; width: 100vw; height: 100vh; }
+      #ui { position: fixed; top: 6px; left: 6px; background: rgba(20, 12, 24, 0.8); padding: 4px 8px; border-radius: 6px; }
+      #ui a { color: #ffd34a; margin-right: 8px; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div id="ui"></div>
+    <script type="module" src="/src/three/dev/artifactsPreview.ts"></script>
+  </body>
+</html>

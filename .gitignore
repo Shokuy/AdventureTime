@@ -1,0 +1,18 @@
+node_modules
+dist
+.DS_Store
+.env.local
+*.local
+
+# Local dependencies and generated files
+node_modules/
+dist/
+build/
+.cache/
+.DS_Store
+
+# Secrets
+.env
+.env.*
+*.pem
+*.key

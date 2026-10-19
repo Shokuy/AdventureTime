@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Сеть — тест</title>
+<style>
+  :root { color-scheme: dark; --bg: #16101a; --panel: #221a28; --line: #3a2e44; --text: #f1e8f5; --dim: #a796b3; --acc: #ffd34a; --ok: #6be08a; --warn: #ffb04a; --bad: #ff6a6a; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 12px 16px 40px; display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-width: 0; }
+  section.wide { grid-column: 1 / -1; }
+  h1 { font-size: 18px; margin: 0; grid-column: 1 / -1; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 0 0 8px; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 6px; }
+  button { background: #3b2d48; color: var(--text); border: 1px solid #574468; border-radius: 6px; padding: 5px 10px; cursor: pointer; font: inherit; }
+  button:hover { background: #4a3a5a; }
+  button.on { background: #6a4a10; border-color: var(--acc); }
+  input[type=text] { background: #120d16; color: var(--text); border: 1px solid #574468; border-radius: 6px; padding: 5px 8px; font: inherit; }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: #3b2d48; color: var(--dim); }
+  .err { color: var(--bad); min-height: 1.2em; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--dim); font-weight: 600; }
+  .p2p { color: var(--ok); } .relay { color: var(--warn); } .connecting { color: var(--dim); }
+  #chatLog { height: 180px; overflow: auto; background: #120d16; border-radius: 6px; padding: 6px 8px; margin-bottom: 6px; font-size: 13px; }
+  #chatLog .old { opacity: .55; }
+  pre { margin: 0; font-size: 11px; color: var(--dim); white-space: pre-wrap; word-break: break-all; max-height: 260px; overflow: auto; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #444; vertical-align: middle; }
+  .dot.live { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main id="app"></main>
+<script type="module" src="/src/net/dev/netTest.ts"></script>
+</body>
+</html>
