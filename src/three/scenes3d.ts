@@ -28,7 +28,8 @@ import { profile } from '../net/profile';
 import { net } from '../net/session';
 import { coop } from './game/coop';
 import { coopFlow } from './game/coopFlow';
-import { prologueDone } from './game/episodes';
+import { prologueDone, episodeList, epState, playEpisode, myProgress, type Episode } from './game/episodes';
+import { MenuTown } from './scenes/menuTown';
 import { LobbyScene, drawCrown } from './scenes/lobby';
 import { ChatPanel } from '../ui/chat';
 import { drawMicBadge, drawSpeaker } from '../ui/voiceHud';
@@ -79,18 +80,35 @@ function skySphere(top: string, bottom: string) {
   return m;
 }
 
+/** the logo's plaque: the prologue, then the arc being played, then a hint of the next land */
+function logoSubtitle(): { text: string; color: string } {
+  if (!prologueDone()) return { text: 'Побег из ямы', color: '#e8383d' };
+  if (myProgress().fangs5?.done) return { text: 'Скоро: Лимонное графство', color: '#c8a020' };
+  return { text: 'Ночь клыков', color: '#9a2a4a' };
+}
+
+/** the save line after the prologue: the series to play next ('Серия 3 из 6') or the arc done */
+function seriesNow(): string {
+  const prog = myProgress();
+  const eps = episodeList().filter((e) => e.n >= 1).sort((a, b) => a.n - b.n);
+  const next = eps.find((e) => epState(e, prog) === 'available');
+  return next ? `Серия ${next.n} из ${eps.length}` : 'арка пройдена';
+}
+
 // ═══════════════════════════════ MENU ═══════════════════════════════
 export class Menu3D {
   is3d = true;
   t = 0;
   scene: THREE.Scene;
   cam = new THREE.PerspectiveCamera(50, 16 / 9, 0.1, 600);
-  king: KingRig;
+  /** the backdrop: the King's throne room until the prologue is done, then Пастильное королевство by night */
+  king: KingRig | null = null;
   kAnim = kingAnim();
-  hero: HeroRig;
+  hero: HeroRig | null = null;
+  town: MenuTown | null = null;
   guards: { rig: Rig<any>; root: THREE.Group; dir: number }[] = [];
   fx = new FX3();
-  mode: 'main' | 'settings' | 'controls' | 'chapters' | 'confirm' = 'main';
+  mode: 'main' | 'settings' | 'controls' | 'chapters' | 'series' | 'confirm' = 'main';
   main: MenuList;
   sub: MenuList | null = null;
   /** «Настройки» / «Управление»: the settings panel (its own tab) */
@@ -100,6 +118,13 @@ export class Menu3D {
   /** co-op: a message from the room flow (kicked, room full…) */
   notice: { text: string; t: number } | null = null;
   constructor() {
+    if (prologueDone()) {
+      this.town = new MenuTown();
+      this.scene = this.town.scene;
+      this.main = this.buildMain();
+      audio.playMusic('menu');
+      return;
+    }
     const b = baseScene('#120c1c', ['#1e1530', 60, 160], ['#d8c8ff', '#2a1c3a', 1.1], ['#c8d8ff', 2.0, [0.3, 1, 0.6]]);
     this.scene = b.scene;
     this.scene.add(room({ theme: 'throne', x0: -40, x1: 40, z0: -50, z1: 40, floorY: 0, wallH: 60 }).obj);
@@ -127,6 +152,18 @@ export class Menu3D {
     audio.playMusic('menu');
   }
   buildMain() {
+    if (prologueDone()) {
+      // after the prologue: the map of Хрумляндия first, the series list, a fresh start at the bottom
+      return new MenuList([
+        { label: 'Карта Хрумляндии', action: () => game.toMap() },
+        { label: 'Серии', action: () => this.open('series') },
+        { label: 'Играть с друзьями', action: () => this.coopLobby() },
+        { label: 'Мой герой', action: () => this.customize() },
+        { label: 'Управление', action: () => this.open('controls') },
+        { label: 'Настройки', action: () => this.open('settings') },
+        { label: 'Новая игра', action: () => this.newGame() },
+      ], 230, 340, { w: 320, h: 40, gap: 7, size: 22 });
+    }
     const m = new MenuList([
       { label: () => (save.data.started ? 'Новая игра' : 'Начать игру'), action: () => this.newGame() },
       // after the prologue «Продолжить» opens the world map of Хрумляндия
@@ -149,7 +186,7 @@ export class Menu3D {
   customize() {
     const menu = this;
     game.go(() => new Customize3D(() => {
-      menu.hero.setLook(profile.look);
+      menu.hero?.setLook(profile.look);
       game.go(() => menu);
     }));
   }
@@ -160,15 +197,33 @@ export class Menu3D {
   }
   open(m: Menu3D['mode']) {
     this.mode = m;
-    const back = { label: 'Назад', action: () => { this.mode = 'main'; this.sub = null; } };
+    const back = m === 'chapters' && prologueDone()
+      ? { label: 'Назад', action: () => this.open('series') }
+      : { label: 'Назад', action: () => { this.mode = 'main'; this.sub = null; } };
     if (m === 'settings' || m === 'controls') {
       const tab: SettingsTab = m === 'controls' ? 'controls' : 'sound';
       this.sub = null;
       this.panel = new SettingsPanel({ tab, where: 'menu', onClose: () => { this.panel = null; this.mode = 'main'; } });
     } else if (m === 'chapters') {
-      const items = STORY.map((s, i) => ({ s, i })).filter(({ s, i }) => s.kind === 'level' && i <= save.data.reached);
+      const items = STORY.map((s, i) => ({ s, i })).filter(({ s, i }) => s.kind === 'level' && (i <= save.data.reached || prologueDone()));
       const medal = (id: string) => { const m = save.data.medals[id] ?? 0; return m ? '   ' + '★'.repeat(m) + '☆'.repeat(3 - m) : ''; };
       this.sub = new MenuList([...items.map(({ s, i }) => ({ label: (s as { title: string }).title + medal((s as { id: string }).id), action: () => game.story(i) })), back], W / 2, 170, { w: 560, h: 52, gap: 10, size: 22 });
+    } else if (m === 'series') {
+      // the prologue (opens its chapter list) and the series of the arc: medals, played / open / locked
+      const prog = myProgress();
+      const stars = (n: number) => '★'.repeat(n) + '☆'.repeat(3 - n);
+      const eps = episodeList().filter((e) => e.n >= 1);
+      const row = (e: Episode) => {
+        const st = epState(e, prog);
+        const medal = prog[e.id]?.medal ?? 0;
+        const tail = st === 'done' ? `   ${stars(medal)}` : st === 'locked' ? '   — закрыто' : '';
+        return {
+          label: `${e.n}. ${e.title}${tail}`,
+          action: () => (e.id === 'prologue' ? this.open('chapters') : playEpisode(e.id)),
+          disabled: () => st === 'locked',
+        };
+      };
+      this.sub = new MenuList([...eps.map(row), back], W / 2, 170, { w: 620, h: 52, gap: 10, size: 22 });
     } else if (m === 'confirm') {
       this.sub = new MenuList([
         { label: 'Да, начать заново', action: () => { save.reset(); game.story(0); } },
@@ -187,9 +242,10 @@ export class Menu3D {
     else if (this.mode === 'main') { this.main.update(dt); if (input.pressed('help')) this.open('controls'); }
     else if (input.pressed('back')) { this.mode = 'main'; this.sub = null; audio.sfx('menuMove'); }
     else this.sub?.update(dt);
+    if (this.town) { this.town.update(dt); this.town.camera(this.cam, this.t); return; }
     this.kAnim.mouth = 0.15 + Math.sin(this.t * 1.2) * 0.12;
-    this.king.update(dt, this.kAnim);
-    this.hero.update(dt, heroAnim({ state: 'lookUp', expr: 'surprised' }));
+    this.king?.update(dt, this.kAnim);
+    this.hero?.update(dt, heroAnim({ state: 'lookUp', expr: 'surprised' }));
     for (const g of this.guards) {
       g.root.position.x += g.dir * dt * 2.2;
       if (g.root.position.x > 34) g.root.position.x = -34;
@@ -205,10 +261,11 @@ export class Menu3D {
     this.cam.lookAt(-2, 14, -20);
   }
   render(ctx: C) {
-    this.fx.setScale(RT.winH * (RT.r3?.pixelRatio ?? 1) * 0.9);
+    const fx = this.town?.fx ?? this.fx;
+    fx.setScale(RT.winH * (RT.r3?.pixelRatio ?? 1) * 0.9);
     render3(this.scene, this.cam);
     ctx.clearRect(0, 0, W, H);
-    for (const ft of this.fx.texts) {
+    for (const ft of fx.texts) {
       const s = toUI(ft.pos, this.cam);
       if (s.vis) text(ctx, ft.text, s.x, s.y, { size: ft.size, color: ft.color, align: 'center', stroke: 4, alpha: Math.min(1, ft.life * 2) });
     }
@@ -219,13 +276,13 @@ export class Menu3D {
       text(ctx, 'Пробел / Enter — выбрать   ↑ ↓ — листать', 230, 690, { size: 15, font: 'body', color: '#d8c8e8', align: 'center', alpha: 0.75 });
       if (save.data.started) {
         const step = STORY[save.data.story];
-        const where = prologueDone() ? 'Карта Хрумляндии' : step?.kind === 'level' ? step.title : step?.kind === 'den' ? 'Берлога Вторника' : step?.kind === 'story' ? 'Заставка' : '';
+        const where = prologueDone() ? `Карта Хрумляндии · ${seriesNow()}` : step?.kind === 'level' ? step.title : step?.kind === 'den' ? 'Берлога Вторника' : step?.kind === 'story' ? 'Заставка' : '';
         text(ctx, `Сохранение: ${where}`, 230, 336, { size: 16, font: 'body', color: '#ffd34a', align: 'center', alpha: 0.85 });
       }
     } else if (this.panel) this.panel.draw(ctx);
     else {
       ctx.fillStyle = 'rgba(12,6,16,0.72)'; ctx.fillRect(-2000, -2000, W + 4000, H + 4000);
-      const title = { settings: 'Настройки', controls: 'Управление', chapters: 'Главы', confirm: 'Начать заново?', main: '' }[this.mode];
+      const title = { settings: 'Настройки', controls: 'Управление', chapters: prologueDone() ? 'Пролог: главы' : 'Главы', series: 'Серии', confirm: 'Начать заново?', main: '' }[this.mode];
       text(ctx, title, W / 2, 110, { size: 52, color: '#ffd34a', align: 'center', stroke: 9 });
       if (this.mode === 'confirm') text(ctx, 'Весь прогресс, крошки и находки пропадут.', W / 2, 300, { size: 24, font: 'body', color: '#f6ecd2', align: 'center' });
       this.sub?.draw(ctx);
@@ -264,14 +321,30 @@ export class Menu3D {
     const a = ease.outBack(clamp(this.t / 1.2, 0, 1));
     ctx.save();
     ctx.translate(230, 120); ctx.scale(a, a); ctx.translate(-230, -120);
-    ctx.save(); ctx.translate(230, 36); ctx.rotate(Math.sin(this.t * 1.5) * 0.08);
-    ctx.beginPath(); ctx.moveTo(-34, 10); ctx.lineTo(-40, -22); ctx.lineTo(-18, -6); ctx.lineTo(0, -32); ctx.lineTo(18, -6); ctx.lineTo(40, -22); ctx.lineTo(34, 10); ctx.closePath();
-    ctx.fillStyle = '#f2c23a'; ctx.fill(); ctx.lineWidth = 5; ctx.strokeStyle = OUT; ctx.stroke();
+    // a compass rose: the far lands are out there
+    ctx.save(); ctx.translate(230, 42); ctx.rotate(Math.sin(this.t * 0.9) * 0.12);
+    ctx.lineJoin = 'round'; ctx.lineWidth = 5; ctx.strokeStyle = OUT;
+    ctx.beginPath(); ctx.arc(0, 0, 21, 0, TAU); ctx.fillStyle = '#3a2a5a'; ctx.fill(); ctx.stroke();
+    for (let i = 0; i < 4; i++) {
+      const r = i * Math.PI / 2 + Math.PI / 4;
+      ctx.beginPath(); ctx.moveTo(Math.cos(r) * 22, Math.sin(r) * 22); ctx.lineTo(Math.cos(r + 0.5) * 7, Math.sin(r + 0.5) * 7); ctx.lineTo(Math.cos(r - 0.5) * 7, Math.sin(r - 0.5) * 7); ctx.closePath();
+      ctx.fillStyle = '#c8b8f0'; ctx.fill(); ctx.lineWidth = 3; ctx.stroke();
+    }
+    for (let i = 0; i < 4; i++) {
+      const r = i * Math.PI / 2 - Math.PI / 2;
+      ctx.beginPath(); ctx.moveTo(Math.cos(r) * 36, Math.sin(r) * 36); ctx.lineTo(Math.cos(r + 0.42) * 9, Math.sin(r + 0.42) * 9); ctx.lineTo(Math.cos(r - 0.42) * 9, Math.sin(r - 0.42) * 9); ctx.closePath();
+      ctx.fillStyle = i === 0 ? '#ff5a5a' : '#f2c23a'; ctx.fill(); ctx.lineWidth = 4; ctx.stroke();
+    }
+    ctx.beginPath(); ctx.arc(0, 0, 5, 0, TAU); ctx.fillStyle = '#fff3d8'; ctx.fill(); ctx.lineWidth = 3; ctx.stroke();
     ctx.restore();
-    word('ГРОМАДНОЕ', 230, 136, 58, '#ffe680', '#ff8a2a', 0);
-    word('КОРОЛЕВСТВО', 230, 206, 49, '#ffd0f0', '#c66ae8', 2);
-    rrect(ctx, 125, 228, 210, 38, 16, '#e8383d', 4);
-    text(ctx, 'Побег из ямы', 230, 255, { size: 23, font: 'body', color: '#fff', align: 'center' });
+    word('ЛЕГЕНДЫ', 230, 138, 66, '#ffe680', '#ff8a2a', 0);
+    word('ДАЛЬНИХ ЗЕМЕЛЬ', 230, 196, 40, '#ffd0f0', '#c66ae8', 2);
+    // the plaque: where the story is now
+    const sub = logoSubtitle();
+    ctx.font = '400 23px Pangolin, sans-serif';
+    const pw = Math.max(210, ctx.measureText(sub.text).width + 44);
+    rrect(ctx, 230 - pw / 2, 220, pw, 38, 16, sub.color, 4);
+    text(ctx, sub.text, 230, 247, { size: 23, font: 'body', color: '#fff', align: 'center' });
     ctx.restore();
   }
 }
