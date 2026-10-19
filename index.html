@@ -4,13 +4,41 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <title>Легенды дальних земель</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>👑</text></svg>" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧭</text></svg>" />
     <style>
       html, body { margin: 0; padding: 0; height: 100%; background: #120b0d; overflow: hidden; }
       canvas { display: block; position: fixed; inset: 0; width: 100vw; height: 100vh; outline: none; touch-action: none; }
       #ui { z-index: 2; }
       #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: #ffd34a; font: 900 28px system-ui, sans-serif; z-index: 3; pointer-events: none; }
     </style>
+    <script>
+      // The game moved to a new address. A browser keeps saves per address, so the old one sends its saves along:
+      // old host → redirect to the new host with the saves in the #hash; the new host takes them unless it has a
+      // save played longer. Runs before the game (module scripts wait for this one).
+      (function () {
+        var NEW = 'dalnie-zemli.vercel.app', OLD = ['gromadnoe-korolevstvo.vercel.app'];
+        var MINE = /^(gromadnoe-korolevstvo|gk-)/;
+        try {
+          if (OLD.indexOf(location.hostname) >= 0) {
+            var out = {};
+            for (var i = 0; i < localStorage.length; i++) { var k = localStorage.key(i); if (k && MINE.test(k)) out[k] = localStorage.getItem(k); }
+            var packed = btoa(unescape(encodeURIComponent(JSON.stringify(out))));
+            location.replace('https://' + NEW + location.pathname + location.search + '#move=' + encodeURIComponent(packed));
+            return;
+          }
+          var m = /^#move=(.+)$/.exec(location.hash);
+          if (!m) return;
+          var got = JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(m[1])))));
+          var played = function (raw) { try { return JSON.parse(raw).playTime || 0; } catch (e) { return 0; } };
+          for (var key in got) {
+            if (!MINE.test(key) || typeof got[key] !== 'string') continue;
+            var cur = localStorage.getItem(key);
+            if (cur === null || (/save/.test(key) && played(got[key]) > played(cur))) localStorage.setItem(key, got[key]);
+          }
+          history.replaceState(null, '', location.pathname + location.search);
+        } catch (e) { /* storage blocked: nothing to move */ }
+      })();
+    </script>
   </head>
   <body>
     <canvas id="game3d"></canvas>

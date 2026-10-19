@@ -206,6 +206,7 @@ export function completeEpisode(id: string): string[] {
   delete p.at;
   save.data.episodes[id] = p;
   save.data.mapAt = id;
+  if (id === 'prologue') grantPrologueKit();
   save.write();
   const fresh = EP_LIST.filter((e) => !before.has(e.id) && epState(e) !== 'locked').map((e) => e.id);
   reveal.push(...fresh);
@@ -223,6 +224,7 @@ export function migrateEpisodes() {
     save.data.episodes.prologue = { done: true, medal: epMedal(EPISODES.prologue) };
     dirty = true;
   }
+  if (grantPrologueKit()) dirty = true;
   for (const ep of EP_LIST) {
     if (!ep.flag || hasStoryFlag(ep.flag, save.data.episodes)) continue;
     const went = EP_LIST.some((e) => e.arc && e.arc === ep.arc && (save.data.episodes[e.id]?.done || save.data.episodes[e.id]?.at !== undefined));
@@ -265,10 +267,24 @@ export function prologueStep(): number {
   return prologueDone() && save.data.story >= ENDING - 1 ? 0 : save.data.story;
 }
 
+/**
+ * The prologue gives the whole kit (slingshot, Перо Прыгуна, fork, Плащ-Рывок): once it is done my hero has all four,
+ * even if some were found in co-op (a room's kit is lent and never saved) or the save is older than the map.
+ * Returns whether anything changed.
+ */
+export function grantPrologueKit(): boolean {
+  if (!prologueDone()) return false;
+  const ab = save.data.abilities;
+  let changed = false;
+  for (const k of Object.keys(ab) as (keyof typeof ab)[]) if (!ab[k]) { ab[k] = true; changed = true; }
+  return changed;
+}
+
 /** solo: play an episode from step `step` (no lock check: the map only offers open ones) */
 export function playEpisode(id: string, step = 0) {
   const ep = EPISODES[id];
   if (!ep || ep.soon) return;
+  if (grantPrologueKit()) save.write();
   save.data.mapAt = id;
   if (id === 'prologue') { game.story(step || prologueStep()); return; }
   game.play({

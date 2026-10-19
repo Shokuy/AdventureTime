@@ -80,9 +80,9 @@ function skySphere(top: string, bottom: string) {
   return m;
 }
 
-/** the logo's plaque: the prologue, then the arc being played, then a hint of the next land */
-function logoSubtitle(): { text: string; color: string } {
-  if (!prologueDone()) return { text: 'Побег из ямы', color: '#e8383d' };
+/** the logo's plaque after the prologue: the arc being played, then a hint of the next land (none before) */
+function logoSubtitle(): { text: string; color: string } | null {
+  if (!prologueDone()) return null;
   if (myProgress().fangs5?.done) return { text: 'Скоро: Лимонное графство', color: '#c8a020' };
   return { text: 'Ночь клыков', color: '#9a2a4a' };
 }
@@ -308,10 +308,12 @@ export class Menu3D {
     word('ДАЛЬНИХ ЗЕМЕЛЬ', 230, 196, 40, '#ffd0f0', '#c66ae8', 2);
     // the plaque: where the story is now
     const sub = logoSubtitle();
-    ctx.font = '400 23px Pangolin, sans-serif';
-    const pw = Math.max(210, ctx.measureText(sub.text).width + 44);
-    rrect(ctx, 230 - pw / 2, 220, pw, 38, 16, sub.color, 4);
-    text(ctx, sub.text, 230, 247, { size: 23, font: 'body', color: '#fff', align: 'center' });
+    if (sub) {
+      ctx.font = '400 23px Pangolin, sans-serif';
+      const pw = Math.max(210, ctx.measureText(sub.text).width + 44);
+      rrect(ctx, 230 - pw / 2, 220, pw, 38, 16, sub.color, 4);
+      text(ctx, sub.text, 230, 247, { size: 23, font: 'body', color: '#fff', align: 'center' });
+    }
     ctx.restore();
   }
 }
