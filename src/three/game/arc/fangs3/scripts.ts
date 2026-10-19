@@ -289,7 +289,7 @@ const scripts: Record<string, ScriptFn> = {
     for (const k of CAST) { c.look(k, null); c.expr(k, 'normal'); }
     openExit(L);
     stageOff(L);
-    gather(L, C.x, C.z - 4, 3, Math.PI);
+    gather(L, C.x, C.z - 12, 3, 0); // north of the bed, facing the open door out
     yield L.camBack(0.7);
     L.cutscene(false);
     L.hud.toast(TOAST.exit, 6);

@@ -280,7 +280,8 @@ function* bossDefeat(L: Level3D): Script {
   const m = rowMarks();
   cast.hideAll();
   for (const k of CAST) { cast.place(k, m[k].x, m[k].y, m[k].z - 1.6, Math.PI); cast.look(k, spot); }
-  yield L.shot(V(c.x + 3.6, c.y + 1.7, c.z + 3.6), spot.clone().add(V(-0.4, 0.8, 0.6)), 0);
+  // (from a step back: the four on the left of the frame, Ноки no longer right against the lens)
+  yield L.shot(V(c.x + 5.2, c.y + 2.0, c.z + 2.4), spot.clone().add(V(-0.4, 0.8, 0.6)), 0);
   yield say(L, 'netopyr', DEFEAT.a[1], DEFEAT.a[2]);
   // puff! — a little bat
   ambient(L, () => { L.fx.emit(spot.clone().add(V(0, 1, 0)), { count: 40, speed: [1, 4], life: [0.5, 1], size: [0.3, 0.6], size2: 2, colors: ['#3b2b52', '#5d4880', '#b31c3c', '#ffffff'], g: -1, drag: 2 }); audio.sfx('whoosh', { pitch: 1.6 }); });

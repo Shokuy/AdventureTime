@@ -78,7 +78,9 @@ export class Twins implements Boss3Like, Netted, Actor3 {
   netId = 0;
   dead = false;
   name = 'СЁСТРЫ БЛИЗНЯШКИ';
-  hp = 1; maxHp = 1;
+  /** both sisters' health together (the generic boss API: co-op hit credit in score.ts, dev tools) */
+  get hp() { return this.sis[0].hp + this.sis[1].hp; }
+  get maxHp() { return this.sis[0].maxHp + this.sis[1].maxHp; }
   mode: Mode = 'intro';
   modeT = 0;
   phase = 1;
@@ -467,7 +469,7 @@ export class Twins implements Boss3Like, Netted, Actor3 {
       hit = true;
       if (kind === 'chord') { s.stunT = 1.8; s.flash = 1; this.say(L, s, LINES4.backHit[1], 1.2); continue; }
       if (kind === 'syrup') s.slowT = 3;
-      if (this.canHurt(s, who.pos)) this.damage(L, s, Math.max(1, Math.round(dmg)), sc);
+      if (this.canHurt(s, who.pos)) this.wound(L, s, Math.max(1, Math.round(dmg)), sc);
       else this.blocked(L, s, sc);
     }
     return hit;
@@ -479,7 +481,7 @@ export class Twins implements Boss3Like, Netted, Actor3 {
       const sc = this.center(s, v2);
       if (Math.hypot(sc.x - sh.pos.x, sc.z - sh.pos.z) > 0.7 + sh.r || Math.abs(sc.y - sh.pos.y) > 1.1) continue;
       const who = this.heroBy(L, sh.shooter);
-      if (this.canHurt(s, who.pos)) this.damage(L, s, Math.max(1, sh.dmg), sh.pos.clone());
+      if (this.canHurt(s, who.pos)) this.wound(L, s, Math.max(1, sh.dmg), sh.pos.clone());
       else this.blocked(L, s, sh.pos.clone());
       return true;
     }
@@ -497,7 +499,16 @@ export class Twins implements Boss3Like, Netted, Actor3 {
     if (!L.nl && this.nokiCD <= 0 && this.helpers.some((h) => h.kind === 'noki')) { this.nokiCD = 7; this.castSay(L, 'noki', LINES4.help.noki); }
   }
 
-  private damage(L: Level3D, s: Sis, n: number, at: THREE.Vector3) {
+  /**
+   * The generic boss API the dev tools use (testkit's __chainTest, smoke scripts: boss.damage(L, n, at)): n to both
+   * sisters at once — a paired wound, it stays. Real hits go through meleeHit / shotHit and THE RULE.
+   */
+  damage(L: Level3D, n: number, at: THREE.Vector3 = this.C) {
+    if (!this.fighting || !L.authority) return;
+    for (const s of this.sis) if (!s.down) this.wound(L, s, Math.max(1, n), at.clone());
+  }
+
+  private wound(L: Level3D, s: Sis, n: number, at: THREE.Vector3) {
     if (s.down) return;
     // (a wound counts only what she really lost)
     const real = Math.min(n, s.hp);

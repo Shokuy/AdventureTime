@@ -285,6 +285,8 @@ const SCRIPTS: Record<string, (L: Level3D) => Script> = {
     const R = swampOf(L)!;
     const boss = R.boss;
     L.cutscene(true);
+    // (the candle is out on the walk: back onto the veranda, like the first time)
+    placeMe(L, MARK.veranda.x, MARK.veranda.y, MARK.veranda.z, Math.PI);
     boss.form = 'lady'; boss.act = 'taunt';
     boss.pos.set(ARENA.cx, ARENA.y, ARENA.cz - 4);
     yield L.shot(V(ARENA.cx + 2, 2.8, ARENA.cz + 2), boss.center(), 0);

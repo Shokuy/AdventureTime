@@ -228,6 +228,8 @@ const scripts: Record<string, (L: Level3D) => Script> = {
   *fangs5_boss_intro(L) {
     const r = R(L), c = r.cast, boss = r.boss;
     L.cutscene(true);
+    // (the little bats' scene, if it was skipped, stays skipped: no story beat behind the fight)
+    for (const tr of L.triggers) if (tr.script === 'fangs5_stairs') tr.fired = true;
     if (L.authority) { const i = L.checkpoints.findIndex((k) => k.pos.y > ROOF.y - 1); if (i >= 0) L.lightCandle(i); }
     boss.manual = true;
     kingOnMerlon(boss);
@@ -628,20 +630,22 @@ const special: Record<string, (L: Level3D) => void> = {
       }
     });
     // portraits murmur as you pass (each machine for its own hero)
+    // (the bark's anchor is dropped by this updater, not by L.runGen: a running script counts as a cutscene for
+    // L.inCutscene, which holds the story triggers, the goal arrow and the aim marker)
     let murmur = 4;
+    const anchors: { o: THREE.Object3D; t: number }[] = [];
     L.updaters.push((_t, dt) => {
+      for (let i = anchors.length - 1; i >= 0; i--) if ((anchors[i].t -= dt) <= 0) { anchors[i].o.removeFromParent(); anchors.splice(i, 1); }
       const p = L.player;
       if (L.letterbox > 0.1 || p.pos.z > 3 || p.pos.z < -34 || p.pos.y > 4) return;
       murmur -= dt;
       if (murmur > 0) return;
       murmur = rand(5, 8);
-      const roots = L.scene.children.filter((o) => (o as THREE.Object3D & { isPortrait?: boolean }).isPortrait);
-      void roots;
       const at = new THREE.Object3D();
       at.position.set(p.pos.x > 0 ? 7 : -7, 4.6, p.pos.z + rand(-4, 4));
       L.scene.add(at);
       L.bark(at, choose(F5.portraitBarks), 2.2, 0);
-      L.runGen((function* () { yield wait(2.4); at.removeFromParent(); })());
+      anchors.push({ o: at, t: 2.4 });
     });
     // a restart after the fight began: the host plays the retry for everyone once all are in
     if (L.seen.has('fangs5_shadow')) afterVictory(L);
@@ -685,11 +689,14 @@ function flowActor(L: Level3D) {
       if (libDone) {
         barsK = Math.min(1, barsK + dt / 1.5);
         const l = discAt(SPOTS.stairsLanding);
-        addTrig('fangs5_stairs', [l.x - 2.6, l.y - 0.6, l.z - 2.6, l.x + 2.6, l.y + 2.6, l.z + 2.6]);
+        // (not once the roof scene played: walking back down mid-fight mustn't start it)
+        if (!L2.seen.has('fangs5_boss_intro')) addTrig('fangs5_stairs', [l.x - 2.6, l.y - 0.6, l.z - 2.6, l.x + 2.6, l.y + 2.6, l.z + 2.6]);
+        // the roof opens with the tower, not with the little bats' scene: a hero who got past landing 20 without
+        // standing on it (the chandelier, Бублик's ring, a glide) must still meet the King
+        addTrig('fangs5_boss_intro', [-4, ROOF.y - 1, -104.8, 4, ROOF.y + 3, -99.2]);
       }
       bars.bars.position.y = barsK * 4.6;
       bars.col.active = barsK < 0.5;
-      if (L2.seen.has('fangs5_stairs')) addTrig('fangs5_boss_intro', [-4, ROOF.y - 1, -104.8, 4, ROOF.y + 3, -99.2]);
       // after a restart (solo respawn / co-op team wipe) once the fight had begun: the host plays the retry as soon as
       // everyone is in and a hero stands on the roof; a client that loads into a running fight takes it up at once
       const r = R(L2);

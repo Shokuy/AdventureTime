@@ -593,6 +593,8 @@ export class Count3 implements Boss3Like, Netted {
     L.dropPickup('heart', this.center(v1));
     // the scouts he called fly off with him
     for (const e of L.enemies) if (e.kind === 'bat' && !e.dead && e.body.pos.distanceTo(this.env.c) < this.env.R + 8) e.hurt(L, 99, e.body.pos.clone(), 'sun');
+    // his bombs still falling / fizzing fizzle out: none may hurt (or down) a hero in the beat before the defeat scene
+    for (const a of L.actors) if (a instanceof MarshBomb && !a.dead) a.fizzle(L);
   }
 
   // ───────────────────────── solo help (GDD §8) ─────────────────────────
@@ -843,6 +845,7 @@ export class MarshBomb implements Actor3, Hittable3, Netted {
   netEvent(L: Level3D, ev: string, d: { pos?: THREE.Vector3; vel?: THREE.Vector3 }) {
     if (ev === 'bat' && d.pos && d.vel && !this.dead) { this.batted = true; this.state = 'fly'; this.pos.copy(d.pos); this.vel.copy(d.vel); }
     else if ((ev === 'boom' || ev === 'gone') && !this.dead) this.explode(L);
+    else if (ev === 'fizzle') this.fizzle(L);
   }
   update(L: Level3D, dt: number) {
     if (this.dead) return;
@@ -896,6 +899,13 @@ export class MarshBomb implements Actor3, Hittable3, Netted {
       const p = L.player;
       if (!p.dead && p.center().distanceTo(c) < BOMB_R + 0.3) p.hurt(L, 1, c);
     }
+  }
+  /** host: gone without a blast (the Count is beaten); clients drop theirs too */
+  fizzle(L: Level3D) {
+    if (this.dead) return;
+    L.fx.emit(this.pos.clone(), { count: 10, speed: [1, 2.5], life: [0.25, 0.5], size: [0.12, 0.24], colors: ['#fff4f8', '#ffd0e4'], g: 2, drag: 3 });
+    if (L.authority) L.nl?.entEvent(this, 'fizzle');
+    this.remove(L);
   }
   private remove(L: Level3D) {
     this.dead = true;

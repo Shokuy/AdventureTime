@@ -374,7 +374,12 @@ export function fangs2Special(L: Level3D) {
     L.runGen((function* () { yield { update: (() => { let t = 0; return (dt: number) => (t += dt) > 1.6; })() }; L.run('fangs2_boss_defeat'); })());
   };
   const won = L.seen.has('fangs2_boss_defeat');
-  if (won) afterVictory(L, true);
+  if (won) {
+    afterVictory(L, true);
+    // rebuilt between the defeat and the ending: the ending (it opens the way home) still has to play
+    const nl = L.nl;
+    if (!L.seen.has('fangs2_ending') && L.authority) L.runGen((function* () { yield nl ? { update: () => !nl.waiting } : undefined; L.run('fangs2_ending'); })());
+  }
   else if (L.seen.has('fangs2_boss_intro')) {
     // a restart in the fight (solo respawn / co-op team wipe): Морок greets you again, the fight goes on
     L.boss = boss;

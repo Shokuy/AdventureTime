@@ -819,6 +819,8 @@ export class Morok3 implements Boss3Like, Netted {
     this.form = 'dead'; this.st = 0;
     this.go('fall', 2);
     this.pos.copy(at).setY(ARENA.y);
+    // the beat before the defeat scene: a last shockwave must not kill my hero (solo: that rebuilds the level → the fight again)
+    L.player.invuln = Math.max(L.player.invuln, 2.5);
     audio.sfx('victory', { volume: 0.5 });
     L.hud.showBanner('МОРОК ПОВЕРЖЕНА!', '#ffd34a');
     L.tcam.shake(0.5);

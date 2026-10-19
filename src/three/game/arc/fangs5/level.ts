@@ -97,6 +97,8 @@ function bridge(L: Level3D) {
   block(b, M.stone(), -24, 0, 40, -2.5, 14, 46);
   block(b, M.stone(), 2.5, 0, 40, 24, 14, 46);
   block(b, M.stone(), -2.5, 6, 40, 2.5, 14, 46);
+  // the floor of the gate passage (bridge deck → courtyard)
+  block(b, M.flagD(), -2.5, -2, 40, 2.5, 0, 46, { tile: 3 });
   crenels(b, M.stone(), -24, 46, 24, 46, 14, { guard: 0 });
   archFrame(b, 0, 0, 46.1, 5, 6);
   tower(b, -6.5, 46.5, 3.2, 0, 20, { roof: 7, window: true });
@@ -137,7 +139,7 @@ function bridge(L: Level3D) {
 function courtyard(L: Level3D) {
   const V = vamp(L);
   const b = new B('f5court');
-  block(b, M.flag(), -22, -2, 4, 22, 0, 40, { tile: 3 });
+  block(b, M.flag(), -22, -2, 3, 22, 0, 40, { tile: 3 });
   // curtain walls with battlements
   block(b, M.stone(), -25, 0, 4, -22, 9, 40);
   block(b, M.stone(), 22, 0, 4, 25, 9, 40);
