@@ -471,7 +471,8 @@ export class Level3D {
       bars.add(b);
       const tip = mesh(new THREE.ConeGeometry(0.22, 0.5, 8), mat('#e8eef5'));
       tip.position.set(0, 2.2, 0); b.add(tip);
-      cols.push({ kind: 'box', min: new THREE.Vector3(x - 0.7, cy, z - 0.7), max: new THREE.Vector3(x + 0.7, cy + 4, z + 0.7), active: false, tag: 'gate' });
+      cols.push({ kind: 'box', min: new THREE.Vector3(x - 0.7, cy, z - 0.7), max: new THREE.Vector3(x + 0.7, cy + 7, z + 0.7), active: false, tag: 'gate' });
+      // (7 m, not the bars' 4: the ring of tops must not be a ledge a trampoline / pad can land a hero on)
     }
     bars.visible = false;
     this.scene.add(bars);
@@ -1059,6 +1060,8 @@ export class Level3D {
     }
   }
 
+  /** seconds a wave enemy has been outside its closed ambush ring */
+  private strayT = new WeakMap<object, number>();
   private updateArenas(dt: number) {
     const auth = this.authority;
     const busy = this.nl ? this.worldCut : this.inCutscene;
@@ -1077,6 +1080,19 @@ export class Level3D {
       if (this.nl && a.state === 'active') this.coopArena(a, i, dt);
       if (auth && a.state === 'active') {
         a.alive = a.alive.filter((e) => !e.dead);
+        // a wave enemy that got outside the closed bars (knocked over, a fleeing bat) can't be reached: back into the ring
+        // (flyers swoop out for a moment: only after 2.5 s outside)
+        if (!a.open) for (const e of a.alive) {
+          const p = e.body.pos, dx = p.x - a.center.x, dz = p.z - a.center.z, d = Math.hypot(dx, dz);
+          if (d < a.radius + 0.6 && p.y > a.center.y - 2.5) { this.strayT.delete(e); continue; }
+          const t = (this.strayT.get(e) ?? 0) + dt;
+          this.strayT.set(e, t);
+          if (t < 2.5) continue;
+          this.strayT.delete(e);
+          const k = d > 0.01 ? Math.max(1, a.radius - 2) / d : 0;
+          p.set(a.center.x + dx * k, Math.max(p.y, a.center.y + 0.5), a.center.z + dz * k);
+          e.body.vel.set(0, 0, 0);
+        }
         if (a.alive.length === 0) {
           a.wave++;
           if (a.wave < a.waves.length) { this.spawnWave(a); this.toast(`Волна ${a.wave + 1} из ${a.waves.length}`); if (this.nl) net.send('all', GM.arena, { i, s: 'wave', w: a.wave }); }
