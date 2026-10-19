@@ -15,7 +15,7 @@ const smooth = (a: number, b: number, x: number) => { const k = invLerp(a, b, x)
 /** the player's zoom range (wheel / zoom keys / settings «Дальность камеры») */
 export const ZOOM_MIN = 4, ZOOM_MAX = 13;
 /** inside a raised ambush ring: the orbit keeps this far inside the bars; it tilts up to RING_PITCH (rad) to do so */
-const RING_MARGIN = 0.8, RING_PITCH = 0.85;
+const RING_MARGIN = 0.8, RING_PITCH = 0.85, RING_OUT = 1.5, RING_PITCH_OUT = 1.15;
 /** the vertical field of view every cutscene shot (L.shot) is framed for */
 const CINE_FOV = 58;
 
@@ -210,7 +210,7 @@ export class TPCamera {
       let d = this.dist;
       if (phys) {
         const ringy = this.rings.length > 0;
-        if (ringy) this.ringLift(af, tmpD, d);
+        if (ringy) d = this.ringLift(af, tmpD, d);
         const hit = phys.raycast(af, tmpD, d + 0.4, ringy ? this.skipRing : this.camSkip ?? undefined);
         if (hit < d + 0.4) d = Math.max(1.2, hit - 0.4);
       }
@@ -242,7 +242,7 @@ export class TPCamera {
    * keeps that tilt and looks over / through the thin bars from outside (the level hides the bars in its way, see
    * Level3D.ringBarsClear) instead of being shoved against their tall invisible wall (it used to end up inside a bar,
    * 1.2 m from the hero, the hero filling the screen). Continuous: at RING_PITCH both cases are the same spot.
-   * Turns `dir` in place.
+   * Turns `dir` in place; returns the orbit distance.
    */
   private ringLift(o: THREE.Vector3, dir: THREE.Vector3, d: number) {
     for (const g of this.rings) {
@@ -257,9 +257,18 @@ export class TPCamera {
       const allow = Math.max(0, disc > 0 ? -b + Math.sqrt(disc) : 0);
       if (d * hl <= allow) continue;
       const p0 = Math.asin(clamp(dir.y, -1, 1));
-      const p = Math.max(p0, Math.min(RING_PITCH, Math.acos(clamp(allow / d, 0, 1))));
+      let p = Math.max(p0, Math.min(RING_PITCH, Math.acos(clamp(allow / d, 0, 1))));
+      // outside, the market's stalls and awnings crowd the ring (no colliders on awnings): stay within RING_OUT of the
+      // bars — steeper still (to RING_PITCH_OUT), then closer
+      const Ro = g.r + RING_OUT, c1 = ox * ox + oz * oz - Ro * Ro;
+      const out = -b + Math.sqrt(Math.max(0, b * b - c1));
+      if (d * Math.cos(p) > out) {
+        p = Math.max(p, Math.min(RING_PITCH_OUT, Math.acos(clamp(out / d, 0, 1))));
+        if (d * Math.cos(p) > out) d = Math.max(2.4, out / Math.cos(p));
+      }
       dir.set(ux * Math.cos(p), Math.sin(p), uz * Math.cos(p));
     }
+    return d;
   }
 
   /** cinematic: camera moves toward cinePos and looks at cineLook */
