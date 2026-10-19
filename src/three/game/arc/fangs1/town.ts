@@ -520,7 +520,7 @@ export class NightTown {
     folk('marmeladka', 'gumdrop', { color: '#5ad86a', hold: 'lantern', hat: 'bow', accent: '#ff5a8a', scale: 0.85 }, V(-6.4, 0, -5.2), 2.4, 'wave');
     folk('a', 'marsh', { color: '#ffd6e4', hat: 'kerchief', accent: '#ff5a8a' }, V(-0.6, 0, -8.6), 0.4, 'cheer');
     folk('b', 'ginger', { hat: 'top', accent: '#ff5a8a' }, V(5.6, 0, 2.6), -2.2, 'talk');
-    folk('c', 'cupcake', { color: '#ffc8e0', accent: '#9a6ad8', hat: 'chef' }, V(-3.4, 0, 3.6), 1.2);
+    folk('c', 'cupcake', { color: '#ffc8e0', accent: '#9a6ad8', hat: 'chef' }, V(-4.1, 0, 4.4), 1.2); // (off the fountain's rim)
     // the Count (a figure for the scene; the boss is on the roofs)
     const rig = createCount();
     const g = new THREE.Group(); g.add(rig.root); g.position.copy(TOWER.spire); g.visible = false;
@@ -550,7 +550,7 @@ export class NightTown {
   batsBurst() {
     const L = this.L;
     const starts = [V(-14.5, 6, -32), V(-22.5, 6.5, -32), V(14.5, 6, -32), V(-38.5, 6, -4), V(TOWER.x, 17, TOWER.z), V(22.5, 6, 35), V(-14.5, 6, 35), V(30.5, 5.5, -32)];
-    const ends = [V(-6.4, 1.2, -5.2), V(-0.6, 1.2, -8.6), V(5.6, 1.2, 2.6), V(-3.4, 1.2, 3.6), MARKS.ladder.clone().add(V(0.9, 2.6, 0.9))];
+    const ends = [V(-6.4, 1.2, -5.2), V(-0.6, 1.2, -8.6), V(5.6, 1.2, 2.6), V(-4.1, 1.2, 4.4), MARKS.ladder.clone().add(V(0.9, 2.6, 0.9))];
     starts.forEach((s, i) => {
       for (let k = 0; k < 2; k++) {
         const rig = createBat();

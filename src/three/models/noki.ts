@@ -287,7 +287,7 @@ export function createNoki(look: Partial<HeroLook> = DEFAULT_LOOKS.noki): HeroRi
   const face = buildToonFace(head, M, {
     R, eyeYaw: 0.36, eyePitch: -0.1, eyeW: 0.05, eyeH: 0.058, eyeTilt: 0.1,
     iris: '#e8203c', irisDark: '#5a0616', slit: true, irisSize: 0.74, lidMat: skin, lidRest: 0.32,
-    lash: '#1c1024', liner: true, lashes: 2, brow: HAIR, browThick: 0.011, browW: 0.046, browLift: 1.9, browOut: 1.085,
+    lash: '#1c1024', liner: true, lashes: 2, brow: HAIR, browThick: 0.011, browW: 0.046, browLift: 1.85, browOut: 1.16,
     mouthPitch: -0.5, mouthW: 0.04, rest: 'smirk', fangs: 1, cheek: '#c27ad8', mouthColor: '#4a0e22',
     nose: { mat: skinD, w: 0.012, h: 0.009 },
   });
@@ -305,17 +305,17 @@ export function createNoki(look: Partial<HeroLook> = DEFAULT_LOOKS.noki): HeroRi
     return piv;
   };
   // bangs: sweeping from her right to her left, one long lock dipping past her left eye
-  lock(hair, -0.62, 0.5, 0.13, 0.065, -0.45, hairM, { curl: 0.35 });
-  lock(hair, -0.34, 0.6, 0.14, 0.07, -0.3, hairM, { curl: 0.4 });
-  lock(hair, -0.08, 0.62, 0.15, 0.075, 0.15, hairL, { curl: 0.45 });
-  lock(hair, 0.18, 0.62, 0.17, 0.075, 0.35, hairM, { curl: 0.45 });
-  lock(hair, 0.44, 0.55, 0.21, 0.07, 0.42, hairM, { curl: 0.35, sweep: 0.1 });
+  lock(hair, -0.62, 0.52, 0.12, 0.065, -0.45, hairM, { curl: 0.4 });
+  lock(hair, -0.34, 0.63, 0.12, 0.07, -0.3, hairM, { curl: 0.45 });
+  lock(hair, -0.08, 0.66, 0.13, 0.075, 0.15, hairL, { curl: 0.5 });
+  lock(hair, 0.18, 0.66, 0.14, 0.075, 0.35, hairM, { curl: 0.5 });
+  lock(hair, 0.44, 0.55, 0.2, 0.07, 0.42, hairM, { curl: 0.35, sweep: 0.1 });
   // the streak (look colour) among the bangs on her left
   const streakG = grp(hair);
   lock(streakG, 0.3, 0.64, 0.19, 0.05, 0.4, streakM, { curl: 0.45, r: 1.06 });
   lock(streakG, 0.66, 0.42, 0.22, 0.05, 0.25, streakM, { curl: 0.3, r: 1.06 });
   // crown spikes (point up and back)
-  for (const [yaw, pitch, len, rz, m] of [[0.1, 1.05, 0.17, Math.PI + 0.25, hairM], [-0.3, 0.92, 0.14, Math.PI - 0.35, hairL], [0.5, 0.85, 0.13, Math.PI + 0.65, hairM], [2.6, 0.75, 0.15, Math.PI - 0.5, hairM], [-2.7, 0.8, 0.14, Math.PI + 0.4, hairM]] as const) lock(hair, yaw, pitch, len + 0.03, 0.07, rz, m, { curl: -0.25, tilt: -0.5, r: 1.1 });
+  for (const [yaw, pitch, len, rz, m] of [[0.1, 1.05, 0.17, Math.PI + 0.25, hairM], [-0.3, 0.92, 0.14, Math.PI - 0.35, hairL], [0.5, 0.85, 0.13, Math.PI + 0.65, hairM], [2.6, 0.75, 0.15, Math.PI - 0.5, hairM], [-2.7, 0.8, 0.14, Math.PI + 0.4, hairM]] as const) lock(hair, yaw, pitch, len + 0.06, 0.045, rz, m, { curl: -0.3, tilt: -0.35, r: 1.12, th: 0.035 });
   // sides: the bob down to the jaw, flipping out — longer on her left (+X)
   for (const [yaw, len, m] of [[1.12, 0.26, hairM], [1.48, 0.3, hairL], [1.88, 0.27, hairM], [2.35, 0.22, hairM]] as const) lock(hs, yaw, 0.15, len, 0.1, 0.18, m, { curl: 0.85, r: 1.06 });
   for (const [yaw, len, m] of [[-1.12, 0.18, hairM], [-1.48, 0.2, hairM], [-1.88, 0.2, hairL], [-2.35, 0.18, hairM]] as const) lock(hs, yaw, 0.12, len, 0.1, -0.2, m, { curl: 0.9, r: 1.06 });

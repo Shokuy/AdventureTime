@@ -59,6 +59,8 @@ export interface ToonFaceOpts {
   cheek?: string;
   /** a little nose */
   nose?: { mat: THREE.Material; w: number; h?: number; pitch?: number };
+  /** mouth anchor radius factor (when the surface under the mouth bulges past the sphere) */
+  mouthOut?: number;
   /** no mouth (the dog has a real jaw) */
   noMouth?: boolean;
   /** keep the brows above hair: lift their anchor off the sphere (default 1.0 = on the surface) */
@@ -68,7 +70,7 @@ export interface ToonFaceOpts {
 export interface FaceLook { x: number; y: number }
 export interface ToonFace {
   /** call each frame; `look` (−1..1) overrides the idle saccades; `browBias` lifts / lowers the brows a bit (acting) */
-  update(dt: number, ex: HeroExpr, talk: number, o?: { look?: FaceLook | null; browBias?: number; cock?: number }): void;
+  update(dt: number, ex: HeroExpr, talk: number, o?: { look?: FaceLook | null; browBias?: number; cock?: number; lid?: number }): void;
   /** the groups (to hide the face, e.g. while transformed) */
   root: THREE.Group;
   dispose(): void;
@@ -182,7 +184,7 @@ interface XP {
   shut?: boolean; chev?: boolean;
 }
 const X: Record<HeroExpr, XP> = {
-  normal: { up: -1.0, lo: 1.2, slant: 0, small: false, bY: 0, bR: 0.06, m: 'smile', w: 1, hu: 0, hl: 0, teeth: 0, tongue: false },
+  normal: { up: -1.0, lo: 1.2, slant: 0, small: false, bY: 0.05, bR: -0.04, m: 'smile', w: 1, hu: 0, hl: 0, teeth: 0, tongue: false },
   happy: { up: -1.15, lo: -0.5, slant: -0.05, small: false, bY: 0.45, bR: -0.18, m: 'open', w: 1.15, hu: 0.12, hl: 0.85, teeth: 1, tongue: true },
   angry: { up: -0.5, lo: 0.75, slant: 0.42, small: false, bY: -0.42, bR: 0.55, m: 'open', w: 0.95, hu: 0.32, hl: 0.3, teeth: 2, tongue: false },
   scared: { up: -1.45, lo: 1.35, slant: -0.25, small: true, bY: 0.5, bR: -0.5, m: 'open', w: 0.85, hu: 0.32, hl: 0.5, teeth: 1, tongue: false },
@@ -251,7 +253,7 @@ export function buildToonFace(head: THREE.Object3D, M: Mats, o: ToonFaceOpts): T
 
   // ── mouth ──
   const mw = o.mouthW;
-  const mouthA = surf(root, 0, o.mouthPitch, R * 0.975, C);
+  const mouthA = surf(root, 0, o.mouthPitch, R * 0.975 * (o.mouthOut ?? 1), C);
   const mouth = grp(mouthA);
   const inM = keep(decal(o.mouthColor ?? '#5a1424', 1));
   const tongueM = keep(decal(o.tongueColor ?? '#ff7f96', 3));
@@ -283,7 +285,7 @@ export function buildToonFace(head: THREE.Object3D, M: Mats, o: ToonFaceOpts): T
   let sacT = 0, sacX = 0, sacY = 0, yawn = 0, nextYawn = 4;
   let first = true;
 
-  function update(dt: number, ex: HeroExpr, talk: number, uo: { look?: FaceLook | null; browBias?: number; cock?: number } = {}) {
+  function update(dt: number, ex: HeroExpr, talk: number, uo: { look?: FaceLook | null; browBias?: number; cock?: number; lid?: number } = {}) {
     dt = Math.min(dt, 0.1);
     t += dt;
     const P = X[ex] ?? X.normal;
@@ -306,6 +308,7 @@ export function buildToonFace(head: THREE.Object3D, M: Mats, o: ToonFaceOpts): T
     let lo = P.lo;
     if (!P.shut && ex !== 'happy') { up = up + (0.32 - up) * bk; lo = lo + (-0.3 - lo) * bk; }
     if (yk > 0) up += 0.25 * yk;
+    if (uo.lid) up += (0.3 - up) * clamp(uo.lid);
     const lam = first ? 1e3 : 26;
     cur.up = damp(cur.up, up, ex === 'happy' || P.shut ? 18 : lam, dt);
     cur.lo = damp(cur.lo, lo, ex === 'happy' || P.shut ? 18 : lam, dt);
@@ -321,6 +324,7 @@ export function buildToonFace(head: THREE.Object3D, M: Mats, o: ToonFaceOpts): T
       e.loP.rotation.z = e.s * cur.slant * 0.4;
       e.up.rotation.x = cur.up;
       e.lo.rotation.x = cur.lo;
+      vis(e.lo, cur.lo < 1.15);
       e.deco.rotation.z = 0;
       e.deco.position.y = clamp((cur.up + 1.0) * -0.5, -1, 0.2) * eh * 0.9;
       vis(e.deco, cur.up < 0.0);

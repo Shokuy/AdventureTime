@@ -70,7 +70,7 @@ function vface(head: THREE.Object3D, M: Mats, o: VFaceOpts) {
   const glints: THREE.Sprite[] = [];
   for (const s of [1, -1]) {
     const a = surf(head, s * o.eyeYaw, o.eyePitch, o.R * 1.0 + o.eyeW * 0.6, o.center ?? [0, 0, 0]);
-    const g = glintSprite(o.glint ?? '#ff4a5a', o.glintSize ?? o.eyeW * 6, 0);
+    const g = glintSprite(o.glint ?? '#ff4a5a', o.glintSize ?? o.eyeW * 3.5, 0);
     g.position.set(s * o.eyeW * 0.2, o.eyeH * 0.15, 0);
     a.add(g); glints.push(g);
   }
@@ -87,10 +87,10 @@ function vface(head: THREE.Object3D, M: Mats, o: VFaceOpts) {
       face.update(dt, ex, talk, { look });
       const tw = 0.85 + 0.15 * Math.sin(t * 23);
       for (const g of glints) {
-        const a = clamp(gl * tw + ping * 0.8);
+        const a = clamp(gl * tw * 0.7 + ping * 0.6);
         g.material.opacity = a;
         g.visible = a > 0.02;
-        g.scale.setScalar((o.glintSize ?? o.eyeW * 6) * (0.5 + 0.6 * gl + ping * 0.9));
+        g.scale.setScalar((o.glintSize ?? o.eyeW * 3.5) * (0.5 + 0.6 * gl + ping * 0.9));
         g.material.rotation = ping * 1.2 + t * 0.4;
       }
     },
@@ -239,11 +239,11 @@ function batWings(parent: THREE.Object3D, M: Mats, span: number, mem: string, bo
     const root = grp(parent, [s * at[0], at[1], at[2]]);
     root.scale.x = s;
     const sh = grp(root); sh.rotation.order = 'ZYX';
-    const inner = part(sh, wingShapes(), memM, [0, 0, 0], [arm, 1, arm]);
+    const inner = part(sh, wingShapes(), memM, [0, 0, 0], [arm, 1, arm], [-0.18, 0, 0]);
     inner.castShadow = true;
     part(sh, G.capsule(0.018, 1), boneM, [arm * 0.5, 0.004, arm * 0.06], [span * 0.9, arm, span * 0.9], [0, 0, Math.PI / 2], fo);
     const wr = grp(sh, [arm, 0, 0]); wr.rotation.order = 'ZYX';
-    const outer = part(wr, wingOuter(), memM, [0, 0, 0], [hand, 1, hand]);
+    const outer = part(wr, wingOuter(), memM, [0, 0, 0], [hand, 1, hand], [-0.12, 0, 0]);
     outer.castShadow = true;
     // finger bones: wrist → each tip
     for (const [tx, tz] of [[1.15, 0.05], [0.98, -0.42], [0.62, -0.78]] as const) {
@@ -339,11 +339,12 @@ export function createFanger(): VRig {
   const ears = [batEar(head, M, [0.19, 0.05, -0.02], 1, 0.24, SKIN_D, '#e88aa8', 1.0), batEar(head, M, [-0.19, 0.05, -0.02], -1, 0.24, SKIN_D, '#e88aa8', 1.0)];
   for (const [i, e] of ears.entries()) e.scale.x = i === 0 ? 1 : -1;
   // slicked hair + widow's peak + a back curl
-  part(head, G.dome(), M.get(HAIR), [0, 0.02, -0.02], [R * 1.04, R * 0.95, R * 1.0], [-0.3, 0, 0]);
-  part(head, G.cone(), M.get(HAIR), [0, 0.13, 0.17], [0.07, 0.13, 0.03], [Math.PI + 0.45, 0, 0], fo);
+  part(head, G.dome(), M.get(HAIR), [0, 0.0, -0.03], [R * 1.05, R * 0.98, R * 1.02], [-0.62, 0, 0]);
+  part(head, G.cone(), M.get(HAIR), [0, 0.15, 0.135], [0.06, 0.12, 0.03], [Math.PI + 0.75, 0, 0], fo);
+  part(head, G.sphere(), M.get('#4a3a70'), [0.05, 0.17, 0.06], [0.07, 0.025, 0.05], [0.3, 0.3, 0.2], fo); // hair shine
   for (const s of [1, -1]) part(head, G.sphere(), M.get(HAIR), [s * 0.12, 0.12, 0.12], [0.08, 0.04, 0.06], [0, 0, s * 0.4], fo);
   part(head, G.torus(0.05, 0.016, 6, 12, ), M.get(HAIR), [0, 0.06, -0.22], 1, [0.4, 0, 0], fo);
-  const F = vface(head, M, { R, eyeYaw: 0.37, eyePitch: 0.1, eyeW: 0.072, eyeH: 0.08, lidMat: skin, lidRest: 0.32, brow: HAIR, browThick: 0.02, mouthPitch: -0.36, mouthW: 0.075, nose: { mat: skinD, w: 0.03, h: 0.028, pitch: -0.08 }, glintSize: 0.32 });
+  const F = vface(head, M, { R, eyeYaw: 0.37, eyePitch: 0.1, eyeW: 0.072, eyeH: 0.08, lidMat: skin, lidRest: 0.32, brow: HAIR, browThick: 0.02, mouthPitch: -0.36, mouthW: 0.075, nose: { mat: skinD, w: 0.03, h: 0.028, pitch: -0.08 }, glintSize: 0.2 });
   const hit = new HitReact();
   let t = Math.random() * 5, walk = 0, lean = 0, crouch = 0, flare = 0, stream = 0, armF = 0, armUp = 0, look = 0, rub = 0, glow = 0, bodyRoll = 0;
   return {
@@ -429,8 +430,8 @@ export function createBat(): VRig {
   tufts(bob, M, '#2f2244', 6, 0.1, -0.08, 0.05, 2.2, Math.PI - 1, Math.PI + 1);
   const ears = [batEar(bob, M, [0.07, 0.09, -0.01], 1, 0.15, '#3b2b52', '#e88aa8', 0.45), batEar(bob, M, [-0.07, 0.09, -0.01], -1, 0.15, '#3b2b52', '#e88aa8', 0.45)];
   ears[1].scale.x = -1;
-  const F = vface(bob, M, { R: R * 0.95, center: [0, 0.0, 0], eyeYaw: 0.4, eyePitch: 0.18, eyeW: 0.042, eyeH: 0.048, lidMat: fur, lidRest: 0.18, brow: '#1a1028', browThick: 0.012, mouthPitch: -0.25, mouthW: 0.045, rest: 'smile', nose: { mat: M.get('#e88aa8'), w: 0.02, h: 0.016, pitch: -0.05 }, glintSize: 0.2 });
-  const W = batWings(bob, M, 0.46, '#4b3566', '#241830', [0.1, 0.02, -0.01]);
+  const F = vface(bob, M, { R: R * 0.95, center: [0, 0.0, 0], eyeYaw: 0.4, eyePitch: 0.18, eyeW: 0.042, eyeH: 0.048, lidMat: fur, lidRest: 0.18, brow: '#1a1028', browThick: 0.012, mouthPitch: -0.25, mouthW: 0.045, rest: 'smile', nose: { mat: M.get('#e88aa8'), w: 0.02, h: 0.016, pitch: -0.05 }, glintSize: 0.13 });
+  const W = batWings(bob, M, 0.56, '#5d4380', '#241830', [0.1, 0.02, -0.01]);
   // little feet + a tail membrane
   const feet: THREE.Group[] = [];
   for (const s of [1, -1]) {
@@ -514,7 +515,7 @@ export function createFlyer(): VRig {
   ears[1].scale.x = -1;
   // mohawk
   for (let i = 0; i < 4; i++) part(head, G.cone(), M.get(HAIR), [0, 0.17 - i * 0.01, 0.08 - i * 0.07], [0.035, 0.11 - i * 0.012, 0.05], [-0.4 - i * 0.25, 0, 0], fo);
-  const F = vface(head, M, { R, eyeYaw: 0.38, eyePitch: 0.08, eyeW: 0.058, eyeH: 0.065, lidMat: skin, lidRest: 0.28, brow: HAIR, browThick: 0.018, mouthPitch: -0.36, mouthW: 0.065, nose: { mat: skinD, w: 0.024 }, glintSize: 0.3 });
+  const F = vface(head, M, { R, eyeYaw: 0.38, eyePitch: 0.08, eyeW: 0.058, eyeH: 0.065, lidMat: skin, lidRest: 0.28, brow: HAIR, browThick: 0.018, mouthPitch: -0.36, mouthW: 0.065, nose: { mat: skinD, w: 0.024 }, glintSize: 0.19 });
   const W = batWings(body, M, 1.0, '#3d2b5c', '#1e1630', [0.13, 0.14, -0.06]);
   // legs with talons
   const legs: THREE.Group[] = [];
@@ -617,7 +618,7 @@ export function createMistling(): VRig & { body: THREE.Group; cloud: THREE.Group
   // curly moustache
   const mous = cached('mist-moustache', () => taperedTube(new THREE.CubicBezierCurve3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0.06, -0.01, 0.01), new THREE.Vector3(0.12, -0.03, 0), new THREE.Vector3(0.11, 0.03, -0.01)), 14, 6, (u) => 0.016 * (1 - u * 0.75), false));
   for (const s of [1, -1]) part(head, mous, dark, [s * 0.005, -0.06, 0.16], [s, 1, 1], undefined, fo);
-  const F = vface(head, M, { R, eyeYaw: 0.36, eyePitch: 0.12, eyeW: 0.052, eyeH: 0.06, iris: '#5ad0ff', lidMat: face, lidRest: 0.4, brow: '#1d2236', browThick: 0.016, mouthPitch: -0.5, mouthW: 0.06, nose: { mat: M.get('#c3cae4'), w: 0.026, h: 0.03, pitch: -0.12 }, glint: '#7ae0ff', glintSize: 0.26 });
+  const F = vface(head, M, { R, eyeYaw: 0.36, eyePitch: 0.12, eyeW: 0.052, eyeH: 0.06, iris: '#5ad0ff', lidMat: face, lidRest: 0.4, brow: '#1d2236', browThick: 0.016, mouthPitch: -0.5, mouthW: 0.06, nose: { mat: M.get('#c3cae4'), w: 0.026, h: 0.03, pitch: -0.12 }, glint: '#7ae0ff', glintSize: 0.17 });
   const hat = grp(head, [0, 0.15, -0.01]);
   const hatIn = grp(hat, undefined, [0.06, 0, 0.1]);
   part(hatIn, G.cyl(), dark, [0, 0.02, 0], [0.24, 0.022, 0.22]);
@@ -793,7 +794,7 @@ export function createServant(): VRig {
   part(head, cached('srv-nose', () => taperedTube(new THREE.QuadraticBezierCurve3(new THREE.Vector3(0, 0.03, 0), new THREE.Vector3(0, 0.0, 0.1), new THREE.Vector3(0, -0.06, 0.08)), 10, 8, (u) => 0.035 * (1 - u * 0.6), true)), skinD, [0, -0.01, 0.13]);
   for (const s of [1, -1]) part(head, G.sphere(), skinD, [s * 0.15, 0.0, -0.01], [0.03, 0.065, 0.025], [0, 0, s * 0.3]); // droopy ears
   for (let i = -1; i <= 1; i++) part(head, cached('srv-hair', () => taperedTube(new THREE.QuadraticBezierCurve3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0.02, 0.09, 0), new THREE.Vector3(0.08, 0.07, 0)), 8, 4, () => 0.006, false)), M.get('#3a3428'), [i * 0.03, 0.2, -0.01], 1, [0, i * 0.5, 0], fo);
-  const F = vface(head, M, { R, center: [0, 0.03, 0], eyeYaw: 0.34, eyePitch: 0.18, eyeW: 0.045, eyeH: 0.05, iris: '#c0283a', lidMat: skin, lidRest: 0.55, brow: '#3a3428', browThick: 0.014, mouthPitch: -0.55, mouthW: 0.052, rest: 'smirk', glintSize: 0.24 });
+  const F = vface(head, M, { R, center: [0, 0.03, 0], eyeYaw: 0.34, eyePitch: 0.18, eyeW: 0.045, eyeH: 0.05, iris: '#c0283a', lidMat: skin, lidRest: 0.55, brow: '#3a3428', browThick: 0.014, mouthPitch: -0.55, mouthW: 0.052, rest: 'smirk', glintSize: 0.15 });
   const hit = new HitReact();
   let t = Math.random() * 5, walk = 0, hunch = 0, armA = 0, armX = 0, armZ = 0, tw = 0, bow = 0, glow = 0, lean = 0;
   return {
@@ -912,7 +913,7 @@ export function createBrute(): VRig {
   part(jaw, G.sphere(), skinD, [0, -0.03, 0.04], [0.14, 0.075, 0.12]);
   const tusk = M.get('#fff6e0');
   for (const s of [1, -1]) part(jaw, G.cone(), tusk, [s * 0.075, 0.035, 0.12], [0.025, 0.07, 0.025], [0.2, 0, s * -0.2], fo);
-  const F = vface(head, M, { R, eyeYaw: 0.3, eyePitch: 0.08, eyeW: 0.036, eyeH: 0.036, lidMat: skin, lidRest: 0.25, brow: '#3a2a4a', browThick: 0.02, mouthPitch: -0.32, mouthW: 0.04, fangPeek: false, glintSize: 0.24 });
+  const F = vface(head, M, { R, eyeYaw: 0.3, eyePitch: 0.08, eyeW: 0.036, eyeH: 0.036, lidMat: skin, lidRest: 0.25, brow: '#3a2a4a', browThick: 0.02, mouthPitch: -0.32, mouthW: 0.04, fangPeek: false, glintSize: 0.16 });
   const hit = new HitReact();
   let t = Math.random() * 5, walk = 0, raise = 0, squash = 0, lean = 0, twist = 0, punch = 0, glow = 0, toes = 0, slumpK = 0, breathK = 0;
   return {

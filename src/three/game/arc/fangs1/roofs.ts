@@ -35,10 +35,11 @@ export const GALLERY = V(0, 13, 0);
 /** the door in the clock box onto the gallery (east face, beside the clock face): sill (x, y, z), width, height */
 export const ROOF_DOOR = { x: 2.88, y: 13.3, z: 1.95, w: 0.8, h: 1.55 };
 /**
- * the story four's marks on the gallery's east side, in the free band between the clock box (half-width 2.85 with its
- * icing) and the railing (r 4.45) — facing out over the bridge, the way the run starts
+ * the story four's marks on the gallery's east side: in the railing's gap toward the bridge (no posts for |z| < 1.3;
+ * the posts' colliders are r 0.56 round r 4.45) and clear of the clock box (half-width 2.85 with its icing) — a little
+ * arc facing out over the bridge, the way the run starts
  */
-export const GALLERY_MARKS = { noki: V(3.55, 13, -1.85), bublik: V(3.8, 13, -0.65), tosha: V(3.8, 13, 0.55), pastila: V(3.55, 13, 1.75) };
+export const GALLERY_MARKS = { noki: V(3.45, 13, -1.15), bublik: V(3.8, 13, -0.38), tosha: V(3.8, 13, 0.42), pastila: V(3.4, 13, 1.15) };
 
 export function roofsLevel(): Level3Def {
   const p = TOWN_NIGHT;

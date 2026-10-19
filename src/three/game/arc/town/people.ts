@@ -269,7 +269,7 @@ export function createFolk(kind: FolkKind, look: FolkLook = {}): FolkRig {
     R: fR, center: fC, eyeYaw, eyePitch, eyeW: ew, eyeH: ew * 1.22, eyeD: kind === 'lolly' ? 0.6 : 0.45,
     iris, irisSize: 0.8, lidMat: lidM, lidRest: 0.05,
     lashes: lashes ? 2 : 0, lash: '#2a1418', brow, browThick: ew * 0.2, browW: ew * 0.85, browLift: 1.7,
-    mouthPitch, mouthW: headR * 0.17, cheek: '#ff7a9e',
+    mouthPitch, mouthW: headR * 0.22, mouthOut: kind === 'gumdrop' ? 1.07 : 1, cheek: '#ff7a9e',
     nose: kind === 'ginger' || kind === 'lolly' ? undefined : { mat: M.get(shadeHex(color, -0.12)), w: headR * 0.06, h: headR * 0.05, pitch: ang(0, -headR * 0.15 - fC[1], fR)[1] },
   });
 
@@ -279,7 +279,7 @@ export function createFolk(kind: FolkKind, look: FolkLook = {}): FolkRig {
     if (kind === 'marsh') {
       const bm = M.get('#ffffff', { map: marshTex('#fffafc') });
       for (const sx of [1, -1]) part(mA, puffGeo(30 + sx, 0.08), bm, [sx * headR * 0.17, 0, 0.01], [headR * 0.2, headR * 0.1, headR * 0.1], [0, 0, sx * -0.25]);
-      part(hs, puffGeo(33, 0.1), bm, [0, -headR * 0.72, headR * 0.45], [headR * 0.5, headR * 0.4, headR * 0.35]); // the beard
+      part(hs, puffGeo(33, 0.1), bm, [0, -headR * 0.78, headR * 0.55], [headR * 0.48, headR * 0.42, headR * 0.3]); // the beard
       face.root.position.z += 0.0;
     } else {
       for (const sx of [1, -1]) part(mA, G.capsule(headR * 0.045, headR * 0.22), kind === 'ginger' ? white : M.get(shadeHex(color, -0.4)), [sx * headR * 0.14, 0, 0.01], 1, [0, 0, sx * (Math.PI / 2 - 0.35)]);

@@ -129,8 +129,9 @@ function* exitTown(L: Level3D): Script {
   const cast = T.cast;
   L.cutscene(true);
   const d = TOWER.door;
-  cast.place('tosha', d.x + 0.9, 0, d.z + 2.6, Math.PI);
-  cast.place('bublik', d.x + 2.0, 0, d.z + 3.0, Math.PI);
+  // (in front of the porch, clear of the flowerbed east of it: x −12.5…−9.5, z −11.3…−8.7)
+  cast.place('tosha', d.x + 0.4, 0, d.z + 2.4, Math.PI);
+  cast.place('bublik', d.x + 1.0, 0, d.z + 3.3, Math.PI - 0.2);
   cast.place('pastila', d.x - 0.9, 0, d.z + 2.5, Math.PI);
   cast.place('noki', d.x - 2.0, 0, d.z + 3.1, Math.PI + 0.3);
   // from below, up the tower
@@ -177,7 +178,7 @@ function* roofsIntro(L: Level3D): Script {
     cast.place(k, D.x + 0.28, 13, D.z, Math.PI / 2);
     // (round the door's swung leaf: out first, then along the box to the mark)
     const m = M[k];
-    L.runGen((function* (): Script { yield cast.walk(k, D.x + 0.75, D.z - 0.25, 2.4, 1); yield cast.walk(k, m.x, m.z, 2.4, 2); cast.look(k, V(12, 13, m.z * 0.4)); })());
+    L.runGen((function* (): Script { yield cast.walk(k, D.x + 0.5, D.z - 0.5, 2.4, 1); yield cast.walk(k, m.x, m.z, 2.4, 2); cast.look(k, V(12, 13, m.z * 0.4)); })());
     yield wait(0.5);
   }
   yield wait(0.9);
