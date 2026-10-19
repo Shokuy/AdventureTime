@@ -5,6 +5,7 @@ import { Dialog } from '../../../../ui/dialog';
 import type { Waiter } from '../../../../game/coroutine';
 import type { Level3D } from '../../level';
 import { say as townSay, installSpeech } from '../town/speech';
+import { drawPortrait } from '../../../../art/portraits';
 
 /**
  * Dialog lines of the episode (docs/script-fangs.md §7). Тоша / Бублик / Пастила / Ноки / the narrator speak through the
@@ -99,54 +100,8 @@ function drawShepot(L: Level3D, d: Dialog, ctx: CanvasRenderingContext2D, s: Spe
   ctx.restore();
 }
 
-/** Шёпот's round portrait: eyes and ears in the dark — or the little vampire himself once he has been seen */
+/** Шёпот's round portrait: eyes and ears in the dark — or the little vampire himself once he has been seen (art/portraits.ts) */
 export function drawShepotFace(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, t: number, talk: number, seen: boolean, expr?: string) {
-  ctx.save();
-  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.fillStyle = seen ? '#3a3260' : '#0e0c18'; ctx.fill();
-  ctx.save(); ctx.clip();
-  const k = r / 50;
-  if (!seen) {
-    // a heat haze, two pale eyes, the tips of big ears
-    for (let i = 0; i < 5; i++) {
-      ctx.strokeStyle = `rgba(150,170,230,${0.08 + 0.05 * Math.sin(t * 2 + i)})`; ctx.lineWidth = 3 * k;
-      ctx.beginPath(); ctx.ellipse(cx + Math.sin(t + i) * 4 * k, cy + 6 * k, (18 + i * 6) * k, (24 + i * 5) * k, 0, 0, Math.PI * 2); ctx.stroke();
-    }
-    ctx.fillStyle = 'rgba(190,200,255,0.18)';
-    for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(cx + s * 14 * k, cy - 18 * k); ctx.lineTo(cx + s * 34 * k, cy - 46 * k); ctx.lineTo(cx + s * 28 * k, cy - 10 * k); ctx.closePath(); ctx.fill(); }
-    const blink = Math.sin(t * 0.9) > 0.97 ? 0.15 : 1;
-    for (const s of [-1, 1]) {
-      const g = ctx.createRadialGradient(cx + s * 11 * k, cy, 0, cx + s * 11 * k, cy, 12 * k);
-      g.addColorStop(0, 'rgba(255,255,255,0.95)'); g.addColorStop(0.4, 'rgba(200,215,255,0.7)'); g.addColorStop(1, 'rgba(120,140,255,0)');
-      ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(cx + s * 11 * k, cy, 12 * k, 12 * k * blink, 0, 0, Math.PI * 2); ctx.fill();
-    }
-    if (talk > 0.15) { ctx.fillStyle = 'rgba(200,210,255,0.35)'; ctx.beginPath(); ctx.ellipse(cx, cy + 18 * k, 5 * k, (1 + talk * 3) * k, 0, 0, Math.PI * 2); ctx.fill(); }
-  } else {
-    // the little eared vampire in a cloak far too big for him
-    ctx.fillStyle = '#1a1424'; ctx.beginPath(); ctx.ellipse(cx, cy + 52 * k, 46 * k, 30 * k, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#c8bce4';
-    for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(cx + s * 10 * k, cy - 12 * k); ctx.quadraticCurveTo(cx + s * 44 * k, cy - 40 * k, cx + s * 40 * k, cy + 4 * k); ctx.closePath(); ctx.fill(); ctx.lineWidth = 2.5 * k; ctx.strokeStyle = '#2a1b2a'; ctx.stroke(); }
-    ctx.fillStyle = '#f0a8c8';
-    for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(cx + s * 14 * k, cy - 10 * k); ctx.quadraticCurveTo(cx + s * 36 * k, cy - 30 * k, cx + s * 34 * k, cy - 2 * k); ctx.closePath(); ctx.fill(); }
-    ctx.fillStyle = '#d8cef0'; ctx.beginPath(); ctx.ellipse(cx, cy + 6 * k, 22 * k, 24 * k, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.lineWidth = 3 * k; ctx.strokeStyle = '#2a1b2a'; ctx.stroke();
-    const scared = expr === 'scared' || expr === 'sad';
-    for (const s of [-1, 1]) {
-      ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.ellipse(cx + s * 8 * k, cy + 2 * k, 6 * k, 8 * k, 0, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#c0203a'; ctx.beginPath(); ctx.ellipse(cx + s * 8 * k, cy + (scared ? 4 : 3) * k, 3 * k, 4 * k, 0, 0, Math.PI * 2); ctx.fill();
-    }
-    if (scared) { ctx.fillStyle = 'rgba(140,200,255,0.8)'; ctx.beginPath(); ctx.ellipse(cx + 14 * k, cy + 12 * k, 2 * k, 3.5 * k, 0, 0, Math.PI * 2); ctx.fill(); }
-    ctx.strokeStyle = '#2a1b2a'; ctx.lineWidth = 2.5 * k; ctx.beginPath();
-    if (talk > 0.15) ctx.ellipse(cx, cy + 16 * k, 4 * k, (1 + talk * 3) * k, 0, 0, Math.PI * 2);
-    else ctx.arc(cx, cy + 20 * k, 5 * k, Math.PI * 1.15, Math.PI * 1.85);
-    ctx.stroke();
-    ctx.fillStyle = '#ffffff';
-    for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(cx + s * 3 * k, cy + 17 * k); ctx.lineTo(cx + s * 4.5 * k, cy + 22 * k); ctx.lineTo(cx + s * 6 * k, cy + 17 * k); ctx.fill(); }
-  }
-  ctx.restore();
-  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.lineWidth = 5; ctx.strokeStyle = '#0a0812'; ctx.stroke();
-  ctx.lineWidth = 2.5; ctx.strokeStyle = '#8a7ad8'; ctx.beginPath(); ctx.arc(cx, cy, r - 4, 0, Math.PI * 2); ctx.stroke();
-  ctx.restore();
+  drawPortrait(ctx, 'shepot', cx, cy, r, t, talk, expr, seen ? 'seen' : undefined);
 }
 void THREE;

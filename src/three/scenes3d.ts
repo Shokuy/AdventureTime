@@ -5,13 +5,12 @@ import { audio, MusicName } from '../engine/audio';
 import { save } from '../engine/save';
 import { text, rrect, wrap, OUT } from '../art/draw';
 import type { Who } from '../art/characters';
-import { vignetteCanvas } from '../art/props';
 import { Dialog } from '../ui/dialog';
 import { MenuList } from '../ui/widgets';
 import { Coroutine, Script, wait, tween, all } from '../game/coroutine';
 import { game, STORY } from '../game/game';
 import { DenScene } from '../scenes/den';
-import { RT, toUI, cineZoom } from './runtime';
+import { RT, toUI, cineZoom, drawVignette } from './runtime';
 import { mat, basic, mesh, noOutline, canvasTex, PAL } from './gfx';
 import { FX3 } from './fx';
 import { createHero, createDog, createBear, createKing, createGuard, KING_HAND_REST } from './models';
@@ -105,7 +104,6 @@ export class Menu3D {
   sub: MenuList | null = null;
   /** «Настройки» / «Управление»: the settings panel (its own tab) */
   panel: SettingsPanel | null = null;
-  vignette = vignetteCanvas(W, H, 0.6);
   zT = 0;
   /** co-op: a message from the room flow (kicked, room full…) */
   notice: { text: string; t: number } | null = null;
@@ -242,7 +240,7 @@ export class Menu3D {
       const s = toUI(ft.pos, this.cam);
       if (s.vis) text(ctx, ft.text, s.x, s.y, { size: ft.size, color: ft.color, align: 'center', stroke: 4, alpha: Math.min(1, ft.life * 2) });
     }
-    ctx.save(); ctx.globalAlpha = 0.6; ctx.drawImage(this.vignette, 0, 0, W, H); ctx.restore();
+    drawVignette(ctx, 0.6, 0.6);
     if (this.mode === 'main') {
       this.drawLogo(ctx);
       this.main.draw(ctx);
@@ -504,7 +502,6 @@ export class Story3D {
   updaters: ((dt: number) => void)[] = [];
   talkers: Record<string, number> = {};
   overlay: ((ctx: C) => void) | null = null;
-  vignette = vignetteCanvas(W, H, 0.55);
   /** co-op: finished here, waiting for the room (host: for the others' ready / a timeout) */
   private coopT = 0;
   private coopSkip = false;
@@ -556,7 +553,7 @@ export class Story3D {
     this.cam.zoom = cineZoom();
     render3(this.scene, this.cam);
     ctx.clearRect(0, 0, W, H);
-    ctx.drawImage(this.vignette, 0, 0, W, H);
+    drawVignette(ctx, 0.55);
     this.overlay?.(ctx);
     if (this.bigText) {
       const b = this.bigText;

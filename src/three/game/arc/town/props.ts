@@ -788,8 +788,11 @@ export function townSignpost(o: Pal & { x: number; y: number; z: number; rotY?: 
   b.cy(tmat(caneTex('#fff8f0', pal.candy[0], 4)), 0.09, 2.3, 0, 0, 0, 8);
   b.sp(tm('#ffd34a'), 0.14, 0, 2.38, 0, 10);
   const s = new THREE.Shape(); s.moveTo(-0.9, -0.28); s.lineTo(0.7, -0.28); s.lineTo(1.0, 0); s.lineTo(0.7, 0.28); s.lineTo(-0.9, 0.28); s.closePath();
-  b.m(new THREE.ExtrudeGeometry(s, { depth: 0.08, bevelEnabled: false }), tm('#9ae06a'), 0.35, 1.8, -0.04);
-  b.m(cg('town-plane', () => new THREE.PlaneGeometry(1, 1)), tmat(boardTex(o.label, '#9ae06a', '#2a5a2a', 384, 110)), 0.3, 1.8, 0.05, { sx: 1.55, sy: 0.48, cast: false });
+  // the board hangs in FRONT of the post (the cane, r 0.09, used to poke through the label: «К▮РТА»)
+  b.m(new THREE.ExtrudeGeometry(s, { depth: 0.08, bevelEnabled: false }), tm('#9ae06a'), 0.35, 1.8, 0.1);
+  b.m(cg('town-plane', () => new THREE.PlaneGeometry(1, 1)), tmat(boardTex(o.label, '#9ae06a', '#2a5a2a', 384, 110)), 0.3, 1.8, 0.19, { sx: 1.55, sy: 0.48, cast: false });
+  // a little bracket holding it to the post
+  b.bx(tm('#c8a050'), 0.06, 0.62, 0.12, 0, 1.8, 0.07);
   b.cyl(0, 0, 0.12, 0, 2.3);
   return b.done(o.x, o.y, o.z, o.rotY ?? 0);
 }

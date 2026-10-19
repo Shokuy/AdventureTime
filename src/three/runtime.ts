@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import type { Renderer3D } from './render';
+import { vignetteCanvas } from '../art/props';
 
 /** Window/overlay mapping shared by all 3D scenes. UI is drawn in a 1280×720 logical space centered in the window. */
 export const RT = {
@@ -33,4 +34,22 @@ export function toUI(p: THREE.Vector3, cam: THREE.Camera): { x: number; y: numbe
   const wx = (tmp.x * 0.5 + 0.5) * RT.winW;
   const wy = (-tmp.y * 0.5 + 0.5) * RT.winH;
   return { x: (wx - RT.ox) / RT.scale, y: (wy - RT.oy) / RT.scale, vis };
+}
+
+/** a vignette built for the whole visible window (not the 16:9 UI band), rebuilt when the window's shape changes */
+const vigCache = new Map<string, HTMLCanvasElement>();
+export function drawVignette(ctx: CanvasRenderingContext2D, strength: number, alpha = 1) {
+  const v = viewUI();
+  const w = Math.max(16, Math.ceil(v.x1 - v.x0)), h = Math.max(16, Math.ceil(v.y1 - v.y0));
+  const key = `${w}x${h}@${strength}`;
+  let c = vigCache.get(key);
+  if (!c) {
+    if (vigCache.size > 6) vigCache.clear();
+    c = vignetteCanvas(w, h, strength);
+    vigCache.set(key, c);
+  }
+  ctx.save();
+  ctx.globalAlpha *= alpha;
+  ctx.drawImage(c, v.x0, v.y0, v.x1 - v.x0, v.y1 - v.y0);
+  ctx.restore();
 }

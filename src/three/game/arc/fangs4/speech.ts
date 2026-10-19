@@ -4,6 +4,7 @@ import { Dialog } from '../../../../ui/dialog';
 import type { Waiter } from '../../../../game/coroutine';
 import type { Level3D } from '../../level';
 import { say as townSay, type SpeakerId } from '../town/speech';
+import { drawPortrait, PORTRAIT_INFO } from '../../../../art/portraits';
 
 /**
  * Lines of docs/script-fangs.md §8 in this level's dialog box. The cast and the narrator speak through the hub's
@@ -12,10 +13,7 @@ import { say as townSay, type SpeakerId } from '../town/speech';
  */
 export type F4Speaker = SpeakerId | 'nochka' | 'tenka';
 
-const SIS: Record<'nochka' | 'tenka', { name: string; color: string; bg: string; dress: string; hair: string; eye: string }> = {
-  nochka: { name: 'Ночка', color: '#4a2a8a', bg: '#e2dcf2', dress: '#221a30', hair: '#141019', eye: '#9a7aff' },
-  tenka: { name: 'Тенька', color: '#b04ab0', bg: '#f8e4fa', dress: '#a678d8', hair: '#efe6ff', eye: '#ff8ae6' },
-};
+const SIS: Record<'nochka' | 'tenka', { name: string; color: string }> = { nochka: PORTRAIT_INFO.nochka, tenka: PORTRAIT_INFO.tenka };
 
 const mine = new WeakMap<Dialog, 'nochka' | 'tenka' | null>();
 const hooked = new WeakSet<Dialog>();
@@ -89,42 +87,7 @@ function drawBox(d: Dialog, ctx: CanvasRenderingContext2D, id: 'nochka' | 'tenka
   ctx.restore();
 }
 
-/** round portrait of a sister: pale face, her hair, glowing eyes, fangs */
+/** round portrait of a sister: the shared cast portraits (art/portraits.ts) — mirrored twins, Ночка looks left, Тенька right */
 function face(ctx: CanvasRenderingContext2D, id: 'nochka' | 'tenka', cx: number, cy: number, r: number, t: number, talk: number, expr?: string) {
-  const s = SIS[id];
-  const k = r / 50;
-  ctx.save();
-  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.fillStyle = s.bg; ctx.fill();
-  ctx.save(); ctx.clip();
-  ctx.lineWidth = 3 * k; ctx.strokeStyle = OUT;
-  // dress + collar
-  ctx.fillStyle = s.dress; ctx.beginPath(); ctx.ellipse(cx, cy + 58 * k, 38 * k, 26 * k, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  const hy = cy + 6 * k;
-  // hair behind (Тенька: pigtails, Ночка: a bun)
-  ctx.fillStyle = s.hair;
-  if (id === 'tenka') for (const sx of [-1, 1]) { ctx.beginPath(); ctx.ellipse(cx + sx * 34 * k, hy + 14 * k, 9 * k, 22 * k, sx * 0.2, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
-  else { ctx.beginPath(); ctx.arc(cx, hy - 34 * k, 14 * k, 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
-  // head
-  ctx.fillStyle = '#ddd0ee'; ctx.beginPath(); ctx.ellipse(cx, hy, 29 * k, 30 * k, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  // pointy ears
-  for (const sx of [-1, 1]) { ctx.beginPath(); ctx.moveTo(cx + sx * 26 * k, hy - 4 * k); ctx.lineTo(cx + sx * 42 * k, hy - 14 * k); ctx.lineTo(cx + sx * 27 * k, hy + 8 * k); ctx.closePath(); ctx.fill(); ctx.stroke(); }
-  // bangs
-  ctx.fillStyle = s.hair; ctx.beginPath(); ctx.ellipse(cx, hy - 16 * k, 31 * k, 18 * k, 0, Math.PI, Math.PI * 2); ctx.fill(); ctx.stroke();
-  // eyes (scared: round; sly: half-closed)
-  const look = id === 'nochka' ? -3 : 3;
-  for (const sx of [-1, 1]) {
-    const ex = cx + sx * 11 * k, ey = hy + 2 * k;
-    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.ellipse(ex, ey, 7 * k, expr === 'sly' ? 3.5 * k : 8 * k, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = s.eye; ctx.beginPath(); ctx.arc(ex + look * k, ey, (expr === 'scared' ? 2.5 : 3.5) * k, 0, Math.PI * 2); ctx.fill();
-  }
-  // mouth + fangs
-  const mo = 2 + talk * 6;
-  ctx.fillStyle = '#4a0f1c'; ctx.beginPath(); ctx.ellipse(cx, hy + 16 * k, 6 * k, mo * k * 0.6, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#fff';
-  for (const sx of [-1, 1]) { ctx.beginPath(); ctx.moveTo(cx + sx * 4 * k, hy + 14 * k); ctx.lineTo(cx + sx * 2 * k, hy + 20 * k); ctx.lineTo(cx + sx * 6 * k, hy + 14 * k); ctx.fill(); }
-  ctx.restore();
-  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.lineWidth = 4; ctx.strokeStyle = OUT; ctx.stroke();
-  void t;
-  ctx.restore();
+  drawPortrait(ctx, id, cx, cy, r, t, talk, expr);
 }

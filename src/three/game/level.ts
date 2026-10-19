@@ -1064,6 +1064,8 @@ export class Level3D {
   private strayT = new WeakMap<object, number>();
   private updateArenas(dt: number) {
     const auth = this.authority;
+    // the camera looks through raised bars (and keeps its lens off them)
+    this.tcam.rings = this.arenas.filter((a) => a.bars.visible && a.rise > 0.05).map((a) => ({ x: a.center.x, z: a.center.z, r: a.radius, y0: a.center.y - 0.2, y1: a.center.y - 2.2 + a.rise * 4.2 + 2.5 }));
     const busy = this.nl ? this.worldCut : this.inCutscene;
     this.arenas.forEach((a, i) => {
       const inRing = (h: HeroLike) => Math.hypot(h.pos.x - a.center.x, h.pos.z - a.center.z) < a.radius - a.enter && Math.abs(h.pos.y - a.center.y) < 2 && h.body.onGround;

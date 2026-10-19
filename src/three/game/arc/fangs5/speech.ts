@@ -1,16 +1,17 @@
 import { W, H, clamp, ease } from '../../../../engine/util';
 import { rrect, text, wrap, OUT } from '../../../../art/draw';
-import { WHO_INFO, drawPortrait, type Who } from '../../../../art/characters';
+import { type Who } from '../../../../art/characters';
+import { drawPortrait, PORTRAIT_INFO } from '../../../../art/portraits';
 import { Dialog } from '../../../../ui/dialog';
 import type { Waiter } from '../../../../game/coroutine';
 import type { Level3D } from '../../level';
-import { drawFace, type SpeakerId as TownSpeaker } from '../town/speech';
+import { type SpeakerId as TownSpeaker } from '../town/speech';
 
 /**
  * Speakers of «Замок Полночь» (docs/script-fangs.md §0). Тоша / Бублик / Вторник / the narrator are the game's own
  * dialog speakers (`Who`); everyone else talks through the same dialog box (same timing, co-op auto-advance, the
- * scene watchdog) drawn with a portrait of their own: the town's candy faces (town/speech.ts drawFace) for Пастила,
- * Ноки and the townsfolk, and the faces below for the King, the five little bats and Граф Кислоплюй's letter.
+ * scene watchdog) with the shared cast portraits (art/portraits.ts): the King, Граф Кислоплюй's letter, and the five
+ * lieutenants as the little bat-mice they shrank into.
  */
 
 export type SpeakerId = 'tosha' | 'bublik' | 'bear' | 'narrator' | 'pastila' | 'noki' | 'polnoch' | 'kisloplyu'
@@ -28,13 +29,13 @@ export const SPEAKERS: Record<SpeakerId, Speaker> = {
   beze: { name: 'Мадам Безе', color: '#e87aa0', bg: '#fff4f8', town: 'beze' },
   ponchik: { name: 'Пончик', color: '#d0703a', bg: '#ffe8d0', town: 'ponchik' },
   marmeladka: { name: 'Мармеладка', color: '#3aa84a', bg: '#e4ffe4', town: 'marmeladka' },
-  polnoch: { name: 'Король Полночь', color: '#5a4a7a', bg: '#d8d4e4' },
-  kisloplyu: { name: 'Граф Кислоплюй', color: '#c8a010', bg: '#fff6b8' },
-  netopyr: { name: 'Граф Нетопырь', color: '#6a3a8a', bg: '#e8dcf4' },
-  morok: { name: 'Мадам Морок', color: '#3a6a5a', bg: '#dcf0e8' },
-  shepot: { name: 'Шёпот', color: '#6a7a9a', bg: '#e4eaf4' },
-  nochka: { name: 'Ночка', color: '#2a2a3a', bg: '#e0dce8' },
-  tenka: { name: 'Тенька', color: '#9a5ac8', bg: '#f0e4fa' },
+  polnoch: { name: 'Король Полночь', color: PORTRAIT_INFO.polnoch.color, bg: PORTRAIT_INFO.polnoch.bg },
+  kisloplyu: { name: 'Граф Кислоплюй', color: PORTRAIT_INFO.kisloplyu.color, bg: PORTRAIT_INFO.kisloplyu.bg },
+  netopyr: { name: 'Граф Нетопырь', color: PORTRAIT_INFO.netopyr.color, bg: PORTRAIT_INFO.netopyr.bg },
+  morok: { name: 'Мадам Морок', color: PORTRAIT_INFO.morok.color, bg: PORTRAIT_INFO.morok.bg },
+  shepot: { name: 'Шёпот', color: PORTRAIT_INFO.shepot.color, bg: PORTRAIT_INFO.shepot.bg },
+  nochka: { name: 'Ночка', color: PORTRAIT_INFO.nochka.color, bg: PORTRAIT_INFO.nochka.bg },
+  tenka: { name: 'Тенька', color: PORTRAIT_INFO.tenka.color, bg: PORTRAIT_INFO.tenka.bg },
 };
 
 /** the speaker of the line on screen, per dialog box */
@@ -99,110 +100,10 @@ function drawBox(d: Dialog, ctx: CanvasRenderingContext2D, id: SpeakerId) {
   ctx.restore();
 }
 
-type C = CanvasRenderingContext2D;
-const TAU = Math.PI * 2;
-const blob = (c: C, x: number, y: number, rx: number, ry: number, fill: string, lw = 0, rot = 0) => {
-  c.fillStyle = fill; c.beginPath(); c.ellipse(x, y, rx, ry, rot, 0, TAU); c.fill();
-  if (lw) { c.lineWidth = lw; c.strokeStyle = OUT; c.stroke(); }
-};
+/** the lieutenants speak here only as the little bat-mice they shrank into (§9.2.3) */
+const MICE: Partial<Record<SpeakerId, true>> = { netopyr: true, morok: true, shepot: true, nochka: true, tenka: true };
 
-/** a round portrait for any speaker of this episode */
-export function face(ctx: C, id: SpeakerId, cx: number, cy: number, r: number, t: number, talk: number, expr?: string) {
-  const sp = SPEAKERS[id];
-  if (sp.who) { drawPortrait(ctx, sp.who, cx, cy, r, t, talk, expr); return; }
-  if (sp.town) { drawFace(ctx, sp.town, cx, cy, r, t, talk, expr); return; }
-  ctx.save();
-  ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU);
-  ctx.fillStyle = sp.bg; ctx.fill();
-  ctx.save(); ctx.clip();
-  ctx.fillStyle = 'rgba(255,255,255,0.35)';
-  for (let i = 0; i < 8; i++) { const a = t * 0.3 + (i / 8) * TAU; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, r, a, a + 0.25); ctx.closePath(); ctx.fill(); }
-  const k = r / 50;
-  if (id === 'polnoch') king(ctx, cx, cy, k, t, talk, expr);
-  else if (id === 'kisloplyu') envelope(ctx, cx, cy, k, t);
-  else mouse(ctx, id, cx, cy, k, t, talk, expr);
-  ctx.restore();
-  ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU);
-  ctx.lineWidth = 5; ctx.strokeStyle = OUT; ctx.stroke();
-  ctx.lineWidth = 2.5; ctx.strokeStyle = sp.color; ctx.beginPath(); ctx.arc(cx, cy, r - 4, 0, TAU); ctx.stroke();
-  ctx.restore();
-  void WHO_INFO;
-}
-
-/** Король Полночь: pale grey, a crescent crown, a collar of stolen shadows */
-function king(c: C, x: number, y: number, k: number, t: number, talk: number, expr?: string) {
-  // the cloak's high collar with silhouettes in it
-  c.fillStyle = '#1e1830';
-  c.beginPath(); c.moveTo(x - 46 * k, y + 60 * k); c.lineTo(x - 40 * k, y + 4 * k); c.lineTo(x - 18 * k, y + 30 * k); c.lineTo(x + 18 * k, y + 30 * k); c.lineTo(x + 40 * k, y + 4 * k); c.lineTo(x + 46 * k, y + 60 * k); c.closePath(); c.fill();
-  c.lineWidth = 3 * k; c.strokeStyle = OUT; c.stroke();
-  c.fillStyle = 'rgba(150,120,200,0.45)';
-  for (const [dx, dy] of [[-32, 36], [30, 40], [-22, 52]] as const) { blob(c, x + dx * k, y + (dy - 7) * k, 3 * k, 3.5 * k, 'rgba(150,120,200,0.45)'); c.fillRect(x + (dx - 3) * k, y + (dy - 4) * k, 6 * k, 10 * k); }
-  // long pale face
-  blob(c, x, y + 4 * k, 24 * k, 33 * k, '#cfcfdb', 3 * k);
-  // ears
-  for (const s of [-1, 1]) { c.fillStyle = '#bdbdcb'; c.beginPath(); c.moveTo(x + s * 22 * k, y - 2 * k); c.lineTo(x + s * 36 * k, y - 14 * k); c.lineTo(x + s * 22 * k, y + 10 * k); c.closePath(); c.fill(); c.lineWidth = 2.5 * k; c.strokeStyle = OUT; c.stroke(); }
-  // slicked silver hair + widow's peak
-  c.fillStyle = '#8c8a9e'; c.beginPath(); c.moveTo(x - 25 * k, y - 4 * k); c.quadraticCurveTo(x - 22 * k, y - 34 * k, x, y - 30 * k); c.quadraticCurveTo(x + 22 * k, y - 34 * k, x + 25 * k, y - 4 * k); c.lineTo(x + 8 * k, y - 18 * k); c.lineTo(x, y - 8 * k); c.lineTo(x - 8 * k, y - 18 * k); c.closePath(); c.fill();
-  // crescent crown
-  c.fillStyle = '#e8e4f4'; c.beginPath(); c.arc(x, y - 38 * k, 14 * k, Math.PI * 0.85, Math.PI * 2.15); c.arc(x, y - 33 * k, 10 * k, Math.PI * 2.1, Math.PI * 0.9, true); c.closePath(); c.fill();
-  c.lineWidth = 2.5 * k; c.strokeStyle = OUT; c.stroke();
-  // eyes: empty silver with a red spark
-  const sad = expr === 'sad', surprised = expr === 'surprised';
-  for (const s of [-1, 1]) {
-    const ex = x + s * 10 * k, ey = y - 2 * k;
-    blob(c, ex, ey, 7 * k, (surprised ? 7 : 4.5) * k, '#f4f2ff', 2 * k);
-    blob(c, ex, ey + 0.5 * k, 2 * k, 2 * k, '#d02040');
-    c.lineWidth = 3 * k; c.strokeStyle = OUT; c.beginPath();
-    if (sad) { c.moveTo(ex - 7 * k, ey - 6 * k + s * -2 * k); c.lineTo(ex + 7 * k, ey - 6 * k + s * 2 * k); }
-    else { c.moveTo(ex - 7 * k, ey - 7 * k + s * 2 * k); c.lineTo(ex + 7 * k, ey - 7 * k - s * 2 * k); }
-    c.stroke();
-  }
-  // a thin mouth, fangs when talking
-  const my = y + 20 * k;
-  if (talk > 0.15 || surprised) {
-    blob(c, x, my, 7 * k, (2 + talk * 4 + (surprised ? 3 : 0)) * k, '#3a1424', 2 * k);
-    c.fillStyle = '#fff'; for (const s of [-1, 1]) { c.beginPath(); c.moveTo(x + s * 4 * k, my - 2 * k); c.lineTo(x + s * 2.5 * k, my + 3 * k); c.lineTo(x + s * 1 * k, my - 2 * k); c.fill(); }
-  } else { c.lineWidth = 2.5 * k; c.strokeStyle = OUT; c.beginPath(); c.moveTo(x - 8 * k, my); c.lineTo(x + 8 * k, my + (sad ? 2 : -1) * k); c.stroke(); }
-  void t;
-}
-
-/** the letter: a yellow envelope with a lemon seal (it «talks» by wobbling) */
-function envelope(c: C, x: number, y: number, k: number, t: number) {
-  c.save();
-  c.translate(x, y + 6 * k); c.rotate(Math.sin(t * 3) * 0.05);
-  rrect(c, -36 * k, -24 * k, 72 * k, 48 * k, 4 * k, '#ffe45a', 3 * k);
-  c.lineWidth = 3 * k; c.strokeStyle = OUT; c.beginPath(); c.moveTo(-36 * k, -24 * k); c.lineTo(0, 4 * k); c.lineTo(36 * k, -24 * k); c.stroke();
-  blob(c, 0, 4 * k, 10 * k, 8 * k, '#f2c818', 2.5 * k);
-  blob(c, 0, 4 * k, 4 * k, 3 * k, '#9ad020');
-  // sour steam
-  c.strokeStyle = 'rgba(160,200,40,0.7)'; c.lineWidth = 3 * k;
-  for (const s of [-1, 1]) { c.beginPath(); c.moveTo(s * 14 * k, -26 * k); c.quadraticCurveTo(s * 20 * k + Math.sin(t * 4) * 4 * k, -36 * k, s * 12 * k, -46 * k); c.stroke(); }
-  c.restore();
-}
-
-/** the five little bats (the defeated lieutenants, §9.2.3) */
-function mouse(c: C, id: SpeakerId, x: number, y: number, k: number, t: number, talk: number, expr?: string) {
-  const fur = id === 'tenka' ? '#6a4a8a' : id === 'nochka' ? '#2a2236' : id === 'shepot' ? '#7a7a92' : id === 'morok' ? '#3a4a4a' : '#4a3266';
-  // wings behind
-  for (const s of [-1, 1]) {
-    c.fillStyle = fur; c.beginPath(); c.moveTo(x + s * 14 * k, y + 8 * k); c.quadraticCurveTo(x + s * 44 * k, y - 20 * k + Math.sin(t * 8) * 4 * k, x + s * 52 * k, y + 14 * k);
-    c.quadraticCurveTo(x + s * 40 * k, y + 10 * k, x + s * 34 * k, y + 22 * k); c.quadraticCurveTo(x + s * 26 * k, y + 14 * k, x + s * 14 * k, y + 24 * k); c.closePath(); c.fill();
-    c.lineWidth = 2.5 * k; c.strokeStyle = OUT; c.stroke();
-  }
-  if (id === 'shepot') { c.fillStyle = '#2a2a3a'; c.beginPath(); c.moveTo(x - 40 * k, y + 64 * k); c.lineTo(x - 30 * k, y + 2 * k); c.lineTo(x + 30 * k, y + 2 * k); c.lineTo(x + 40 * k, y + 64 * k); c.closePath(); c.fill(); }
-  blob(c, x, y + 12 * k, 22 * k, 20 * k, fur, 3 * k);
-  for (const s of [-1, 1]) { c.fillStyle = fur; c.beginPath(); c.moveTo(x + s * 8 * k, y - 4 * k); c.lineTo(x + s * (id === 'shepot' ? 30 : 20) * k, y - (id === 'shepot' ? 30 : 22) * k); c.lineTo(x + s * 19 * k, y + 2 * k); c.closePath(); c.fill(); c.lineWidth = 2.5 * k; c.strokeStyle = OUT; c.stroke(); }
-  const surprised = expr === 'surprised', sly = expr === 'sly';
-  for (const s of [-1, 1]) {
-    const ex = x + s * 8 * k, ey = y + 8 * k;
-    const look = id === 'nochka' ? -2 : id === 'tenka' ? 2 : 0;
-    blob(c, ex, ey, 5 * k, (surprised ? 7 : 6) * k, '#fff6e0', 2 * k);
-    blob(c, ex + look * k + (sly ? 1.5 * k : 0), ey + 1 * k, 2.4 * k, 3 * k, '#d0202e');
-  }
-  if (id === 'netopyr') { c.lineWidth = 2 * k; c.strokeStyle = '#ffd34a'; c.beginPath(); c.arc(x + 8 * k, y + 8 * k, 7 * k, 0, TAU); c.stroke(); c.beginPath(); c.moveTo(x + 15 * k, y + 8 * k); c.lineTo(x + 18 * k, y + 26 * k); c.stroke(); }
-  if (id === 'morok') { c.fillStyle = 'rgba(30,40,40,0.55)'; c.fillRect(x - 22 * k, y - 4 * k, 44 * k, 10 * k); blob(c, x + 14 * k, y - 16 * k, 6 * k, 5 * k, '#1a1a1a'); }
-  if (id === 'nochka' || id === 'tenka') { const bc = id === 'nochka' ? '#111018' : '#c88aff'; for (const s of [-1, 1]) blob(c, x + s * 6 * k, y - 10 * k, 6 * k, 4 * k, bc, 2 * k, s * 0.5); }
-  const my = y + 20 * k;
-  blob(c, x, my, 4 * k, (1.5 + talk * 3) * k, '#4a0f1c');
-  c.fillStyle = '#fff'; for (const s of [-1, 1]) { c.beginPath(); c.moveTo(x + s * 3 * k, my - 1 * k); c.lineTo(x + s * 2 * k, my + 3 * k); c.lineTo(x + s * 1 * k, my - 1 * k); c.fill(); }
+/** a round portrait for any speaker of this episode: the shared cast portraits (art/portraits.ts) */
+export function face(ctx: CanvasRenderingContext2D, id: SpeakerId, cx: number, cy: number, r: number, t: number, talk: number, expr?: string) {
+  drawPortrait(ctx, id, cx, cy, r, t, talk, expr, MICE[id] ? 'mouse' : undefined);
 }
