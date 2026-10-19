@@ -209,7 +209,7 @@ function wingShapes() {
     s.lineTo(1.0, -0.05); s.quadraticCurveTo(0.95, -0.45, 0.82, -0.78);
     s.quadraticCurveTo(0.55, -0.5, 0.3, -0.62);
     s.quadraticCurveTo(0.15, -0.35, 0, -0.42); s.lineTo(0, 0.06);
-    const g = new THREE.ShapeGeometry(s, 12); g.rotateX(Math.PI / 2); g.scale(1, 1, -1);
+    const g = new THREE.ShapeGeometry(s, 12); g.rotateX(Math.PI / 2);
     return g;
   });
 }
@@ -223,7 +223,7 @@ function wingOuter() {
     s.quadraticCurveTo(0.68, -0.38, 0.62, -0.78);      // → finger 3 tip
     s.quadraticCurveTo(0.35, -0.55, -0.18, -0.78);     // → back to the inner trailing tip
     s.quadraticCurveTo(-0.06, -0.35, 0, -0.05); s.lineTo(0, 0.06);
-    const g = new THREE.ShapeGeometry(s, 12); g.rotateX(Math.PI / 2); g.scale(1, 1, -1);
+    const g = new THREE.ShapeGeometry(s, 12); g.rotateX(Math.PI / 2);
     return g;
   });
 }
@@ -248,7 +248,7 @@ function batWings(parent: THREE.Object3D, M: Mats, span: number, mem: string, bo
     // finger bones: wrist → each tip
     for (const [tx, tz] of [[1.15, 0.05], [0.98, -0.42], [0.62, -0.78]] as const) {
       const len = Math.hypot(tx, tz) * hand;
-      const b = part(wr, G.capsule(0.012, 1), boneM, [tx * hand * 0.5, 0.005, -tz * hand * 0.5], [span * 0.7, len, span * 0.7], [0, 0, 0], fo);
+      const b = part(wr, G.capsule(0.012, 1), boneM, [tx * hand * 0.5, 0.005, tz * hand * 0.5], [span * 0.7, len, span * 0.7], [0, 0, 0], fo);
       b.rotation.set(0, Math.atan2(-tz, tx), Math.PI / 2, 'YXZ');
     }
     // a little thumb claw at the wrist
@@ -656,10 +656,10 @@ export function createMistling(): VRig & { body: THREE.Group; cloud: THREE.Group
       const wMist = isMist ? 1 : isForm ? 1 - easeIn(seg(a.p, 0.15, 0.85)) : a.st === 'die' ? a.p : 0;
       mistK = damp(mistK, wMist, isMist ? 9 : 14, dt);
       formK = 1 - mistK;
-      body.visible = formK > 0.04;
-      // solid body grows out of the mist with a twist (squash & stretch)
+      body.visible = formK > 0.15;
+      // solid body coalesces out of the mist column: thin and tall first, twisting into shape
       const fs = smooth(formK);
-      body.scale.set(lerp(0.4, 1, fs) * (1 + (1 - fs) * 0.2), lerp(0.15, 1, fs), lerp(0.4, 1, fs));
+      body.scale.set(lerp(0.2, 1, fs), lerp(0.75, 1, fs) * (1 + Math.sin(fs * Math.PI) * 0.12), lerp(0.2, 1, fs));
       body.rotation.y = (1 - fs) * 4.5;
       let wLean = 0.05, wArmF = 0.2, wArmUp = 0, ex: HeroExpr = 'normal', wGlow = 0.15, wTwirl = 1, wTip = 0, wSwipe = 0, elbowL = 0.5, elbowR = 1.3;
       if (Math.sin(t * 0.37) > 0.92) wTip = 1; // tips his hat now and then

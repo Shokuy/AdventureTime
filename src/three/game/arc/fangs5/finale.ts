@@ -238,7 +238,7 @@ export function buildSquare(L: Level3D): Square {
     zefirych: mk('marsh', { color: '#fff8fa', hat: 'top', accent: '#6a6a9a', hold: 'pole', glasses: true }, 5.0, 5.4, Math.atan2(-5, -3.4)),
     beze: mk('cupcake', { color: '#fffaf6', accent: '#ff9fc0', hat: 'chef', scale: 1.15, apron: true }, 4.8, -0.2, Math.atan2(-4.8, 2.2)),
     marmeladka: mk('gumdrop', { color: '#5ad86a', hold: 'lantern', hat: 'bow', accent: '#ff5a8a', scale: 0.85 }, -6.6, 6.6, Math.atan2(6.6, -4.6)),
-    ponchik: mk('gumdrop', { color: '#e8a050', hat: 'beret', accent: '#3a6ad8', hold: 'bag' }, 14, 20, Math.PI),
+    ponchik: mk('gumdrop', { color: '#e8a050', hat: 'beret', accent: '#3a6ad8', hold: 'bag' }, 9, 21, Math.PI),
   };
   // the sour letter (Пончик carries it in): a yellow envelope with a lemon seal, sour steam
   const letter = new THREE.Group();
@@ -247,7 +247,8 @@ export function buildSquare(L: Level3D): Square {
   const seal = new THREE.Mesh(G.cyl(), new THREE.MeshToonMaterial({ color: '#9ad020' })); seal.scale.set(0.06, 0.02, 0.06); seal.rotation.x = Math.PI / 2; seal.position.z = 0.03; letter.add(seal);
   letter.visible = false;
   L.scene.add(letter);
-  return { table, marks, ponchikFrom: new THREE.Vector3(S.x + 14, 0, S.z + 20), folk, letter };
+  // (Пончик comes in between the houses: from (14, 20) he ran straight through the one at (14, 15))
+  return { table, marks, ponchikFrom: new THREE.Vector3(S.x + 9, 0, S.z + 21), folk, letter };
 }
 
 export { grp };

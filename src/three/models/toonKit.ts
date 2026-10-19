@@ -55,6 +55,7 @@ export function flatten(g: THREE.Object3D, o: { cast?: boolean } = {}): THREE.Me
     for (const x of geos) x.dispose();
     if (!merged) continue;
     const mesh = new THREE.Mesh(merged, mat);
+    mesh.userData.ownGeo = true;
     mesh.castShadow = o.cast ?? true;
     mesh.receiveShadow = true;
     mesh.layers.mask = layers.get(mat) ?? 1;
@@ -62,6 +63,11 @@ export function flatten(g: THREE.Object3D, o: { cast?: boolean } = {}): THREE.Me
     out.push(mesh);
   }
   return out;
+}
+
+/** free the per-instance geometries flatten() made under `root` (call from a rig's dispose) */
+export function disposeBaked(root: THREE.Object3D) {
+  root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m.userData.ownGeo) m.geometry.dispose(); });
 }
 
 /**

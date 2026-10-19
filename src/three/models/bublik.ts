@@ -7,7 +7,7 @@ import {
 import type { HeroAnim, HeroExpr, HeroRig, HeroState } from './hero';
 import { Dangle } from './humanoid';
 import { buildToonFace } from './toonFace';
-import { flatten } from './toonKit';
+import { flatten, disposeBaked } from './toonKit';
 import { cleanLook, DEFAULT_LOOKS, type HeroLook } from '../../net/profile';
 
 /*
@@ -471,6 +471,6 @@ export function createBublik(look: Partial<HeroLook> = DEFAULT_LOOKS.bublik): He
   return {
     root, update, weaponTip, setLook,
     get look() { return { ...cur }; },
-    dispose() { for (const m of M.all) m.dispose(); face.dispose(); for (const m of [black, white, mouthDark, trailMat]) m.dispose(); },
+    dispose() { for (const m of M.all) m.dispose(); face.dispose(); disposeBaked(root); for (const m of [black, white, mouthDark, trailMat]) m.dispose(); },
   };
 }

@@ -134,8 +134,8 @@ function* exitTown(L: Level3D): Script {
   cast.place('bublik', d.x + 1.0, 0, d.z + 3.3, Math.PI - 0.2);
   cast.place('pastila', d.x - 0.9, 0, d.z + 2.5, Math.PI);
   cast.place('noki', d.x - 2.0, 0, d.z + 3.1, Math.PI + 0.3);
-  // from below, up the tower
-  yield L.shot(V(d.x + 1.5, 0.8, d.z + 6.5), V(d.x, 12, d.z - 2), 0);
+  // from below, over Тоша's shoulder, up the tower
+  yield L.shot(V(d.x + 1.3, 0.75, d.z + 5.0), V(d.x, 6.4, d.z - 2), 0);
   cast.pose('tosha', 'lookUp');
   yield* lines(L, cast, EXIT_TOWN.slice(0, 1));
   cast.pose('tosha', null);

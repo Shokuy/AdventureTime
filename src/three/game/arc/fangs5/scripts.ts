@@ -44,13 +44,19 @@ class Cast {
   }
   face(k: CastKind, x: number, z: number) { const r = this.n[k].root; r.rotation.y = Math.atan2(x - r.position.x, z - r.position.z); }
   hide(...ks: CastKind[]) { for (const k of ks.length ? ks : CAST) this.n[k].root.visible = false; }
-  /** walk a figure to (x, z) over `secs` */
+  /** walk a figure to (x, z) over `secs` (on the ground under it: up a step, down a step) */
   walk(k: CastKind, x: number, z: number, secs: number): Waiter {
     const n = this.n[k];
     const from = n.root.position.clone();
     n.root.rotation.y = Math.atan2(x - from.x, z - from.z);
     n.anim.state = 'run'; n.anim.speed = 0.5;
-    return tween(secs, (q) => { n.root.position.x = lerp(from.x, x, q); n.root.position.z = lerp(from.z, z, q); if (q >= 1) { n.anim.state = 'idle'; n.anim.speed = 0; } });
+    return tween(secs, (q) => {
+      const p = n.root.position;
+      p.x = lerp(from.x, x, q); p.z = lerp(from.z, z, q);
+      const gy = this.L.phys.groundAt(p.x, p.z, p.y + 0.9, 0.25);
+      if (gy > p.y - 3) p.y = gy;
+      if (q >= 1) { n.anim.state = 'idle'; n.anim.speed = 0; }
+    });
   }
   head(k: CastKind, dy = 0.95) { return this.n[k].root.position.clone().setY(this.n[k].root.position.y + dy); }
 }
@@ -132,7 +138,7 @@ const scripts: Record<string, (L: Level3D) => Script> = {
   *fangs5_portraits(L) {
     const c = R(L).cast;
     L.cutscene(true);
-    c.at('noki', 5.5, 0, -6, Math.PI / 2); c.at('pastila', 4.3, 0, -4.3, Math.PI / 2 + 0.55, 'idle', 'surprised'); c.at('bublik', 4.2, 0, -7.8, Math.PI / 2 - 0.5); c.at('tosha', 3.0, 0, -5.8, Math.PI / 2);
+    c.at('noki', 5.5, 0, -6, Math.PI / 2); c.at('pastila', 4.3, 0, -4.3, Math.PI / 2 + 0.55, 'idle', 'surprised'); c.at('bublik', 3.7, 0, -8.4, Math.PI / 2 - 0.5); // (clear of the hall's column at (4.6, −8), r 0.5) c.at('tosha', 3.0, 0, -5.8, Math.PI / 2);
     yield shot(L, V3(3.8, 2.2, -7.3), V3(7.4, 3.9, -6));
     yield shot(L, V3(4.6, 2.0, -7.0), V3(7.4, 4.1, -6), 2.5);
     yield faceShot(L, 'pastila', 2.2, 0.4);
@@ -180,7 +186,8 @@ const scripts: Record<string, (L: Level3D) => Script> = {
     const fwd = (p: THREE.Vector3, d = 1) => Math.atan2(p.z + 86, -(p.x)) * d;
     void fwd;
     const up = at(SPOTS.stairsLanding + 2, 0);
-    const marks: [CastKind, number, number][] = [['tosha', 0.15, 0.6], ['bublik', 0.5, 0.2], ['noki', 0.7, -0.7], ['pastila', 1.0, 0.5]];
+    // (Тоша a little back from the next step: at +0.6 her head was inside its disc)
+    const marks: [CastKind, number, number][] = [['tosha', 0.15, -0.2], ['bublik', 0.5, 0.2], ['noki', 0.7, -0.7], ['pastila', 1.0, 0.5]];
     for (const [k, kk, da] of marks) { const p = landingSpot(SPOTS.stairsLanding, kk, da); c.at(k, p.x, l.y, p.z, Math.atan2(up.x - p.x, up.z - p.z)); }
     // the mice on the next steps, wings spread
     r.mice.forEach((m, i) => {
@@ -209,9 +216,20 @@ const scripts: Record<string, (L: Level3D) => Script> = {
     yield shot(L, lp.clone().setY(l.y + 3.2).lerp(V3(0, l.y + 3.2, -86), 0.3), mid, 0.4);
     for (const m of r.mice) m.anim.squeak = 1;
     mine(L, () => { audio.sfx('batScreech', { pitch: 2.2, volume: 0.4 }); });
-    const tg = discAt(SPOTS.stairsLanding + 4);
-    yield all(...marks.map(([k], i) => c.walk(k, tg.x + Math.cos(i * 1.6) * 0.6, tg.z + Math.sin(i * 1.6) * 0.6, 1.6)),
-      tween(1.6, (k) => { for (const m of r.mice) m.anim.hop = k; }));
+    // (up the steps one by one — a straight line to the fourth step ran through the stair and over the shaft)
+    const upSteps = (k: CastKind, i: number): Waiter => {
+      let j = 0, w: Waiter | null = null;
+      return { update: (dt) => {
+        while (!w || w.update(dt)) {
+          if (++j > 4) return true;
+          const d = discAt(SPOTS.stairsLanding + j);
+          w = c.walk(k, d.x + Math.cos(i * 1.6) * 0.6, d.z + Math.sin(i * 1.6) * 0.6, 0.4);
+          dt = 0;
+        }
+        return false;
+      } };
+    };
+    yield all(...marks.map(([k], i) => upSteps(k, i)), tween(1.6, (k) => { for (const m of r.mice) m.anim.hop = k; }));
     yield wait(0.5);
     endScene(L);
     // (the mice flutter off up the shaft)

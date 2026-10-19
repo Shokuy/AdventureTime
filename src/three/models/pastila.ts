@@ -6,7 +6,7 @@ import {
 } from './kit';
 import { bones, animator, stateExpr, Dangle, type HumanoidSpec, type Pose, type AtkOut } from './humanoid';
 import { buildToonFace } from './toonFace';
-import { flatten, puffGeo } from './toonKit';
+import { flatten, puffGeo, disposeBaked } from './toonKit';
 import type { HeroAnim, HeroAtk, HeroRig } from './hero';
 import { cleanLook, DEFAULT_LOOKS, type HeroLook } from '../../net/profile';
 
@@ -394,6 +394,6 @@ export function createPastila(look: Partial<HeroLook> = DEFAULT_LOOKS.pastila): 
   return {
     root: b.root, update, weaponTip, setLook,
     get look() { return { ...cur }; },
-    dispose() { for (const m of M.all) m.dispose(); face.dispose(); puffM.dispose(); sheenM.dispose(); },
+    dispose() { for (const m of M.all) m.dispose(); face.dispose(); puffM.dispose(); sheenM.dispose(); disposeBaked(b.root); },
   };
 }

@@ -6,7 +6,7 @@ import {
 } from './kit';
 import { bones, animator, stateExpr, Dangle, type HumanoidSpec, type Pose, type AtkOut } from './humanoid';
 import { buildToonFace } from './toonFace';
-import { flatten, lockGeo } from './toonKit';
+import { flatten, lockGeo, disposeBaked } from './toonKit';
 import type { HeroAnim, HeroAtk, HeroRig } from './hero';
 import { cleanLook, DEFAULT_LOOKS, type HeroLook } from '../../net/profile';
 
@@ -520,6 +520,6 @@ export function createNoki(look: Partial<HeroLook> = DEFAULT_LOOKS.noki): HeroRi
   return {
     root: b.root, update, weaponTip, setLook,
     get look() { return { ...cur }; },
-    dispose() { for (const m of M.all) m.dispose(); face.dispose(); glowM.dispose(); },
+    dispose() { for (const m of M.all) m.dispose(); face.dispose(); glowM.dispose(); disposeBaked(b.root); },
   };
 }

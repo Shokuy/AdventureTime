@@ -32,8 +32,8 @@ const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 export const HALL = { c: V(-21.5, 14, -50), R: 12.2, perch: V(-21.5, 20.7, -50) };
 /** the clock tower's gallery (start) */
 export const GALLERY = V(0, 13, 0);
-/** the door in the clock box onto the gallery (east face, beside the clock face): sill (x, y, z), width, height */
-export const ROOF_DOOR = { x: 2.88, y: 13.3, z: 1.95, w: 0.8, h: 1.55 };
+/** the door in the clock box onto the gallery (east face, beside the clock face; clear of the railing posts): sill (x, y, z), width, height */
+export const ROOF_DOOR = { x: 2.88, y: 13.3, z: 1.75, w: 0.8, h: 1.55 };
 /**
  * the story four's marks on the gallery's east side: in the railing's gap toward the bridge (no posts for |z| < 1.3;
  * the posts' colliders are r 0.56 round r 4.45) and clear of the clock box (half-width 2.85 with its icing) — a little

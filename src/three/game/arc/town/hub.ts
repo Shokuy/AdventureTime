@@ -217,7 +217,8 @@ export class TownHub {
     const fl = lay.walks[0];
     this.folkAt('marmeladka', 'marmeladka', 'gumdrop', { color: '#5ad86a', hold: 'lantern', hat: 'bow', accent: '#ff5a8a', scale: 0.85 }, fl[0], 0, { path: fl, speed: 1.7, phase: 0, name: 'Мармеладка' });
     this.folkAt('kid', 'zhitel', 'gumdrop', { color: '#ff7aa8', scale: 0.8, hat: 'beret', accent: '#7ad8ff' }, fl[6], 0, { path: fl, speed: 1.7, phase: 0.5 });
-    const ring = Array.from({ length: 16 }, (_, i) => { const a = (i / 16) * Math.PI * 2; return { x: Math.sin(a) * 12.4, y: 0, z: Math.cos(a) * 12.4 }; });
+    // (r 10.7: inside the benches at (±7, ±10) — at 12.4 his round ran straight through them — and the flowerbeds)
+    const ring = Array.from({ length: 16 }, (_, i) => { const a = (i / 16) * Math.PI * 2; return { x: Math.sin(a) * 10.7, y: 0, z: Math.cos(a) * 10.7 }; });
     this.folkAt('zefirych', 'zefirych', 'marsh', { color: '#fff8fa', hat: 'top', accent: '#6a6a9a', hold: 'pole', glasses: true }, ring[0], 0, { path: ring.reverse(), speed: 0.7, phase: 0.2, name: 'Дед Зефирыч' });
     const b0 = lay.benches[2], b1 = lay.benches[1];
     this.folkAt('granny', grey ? 'presnyak' : 'zhitel', 'marsh', { color: '#ffe8f0', hat: 'kerchief', accent: '#c88aff', glasses: true }, b0.seat, b0.yaw, { mode: 'sit', grey: grey ? 1 : 0, collide: false });
@@ -890,8 +891,9 @@ function* hubArrival(L: Level3D): Script {
   tosha.face = Math.PI;
   yield say(L, 'tosha', 'Э-э… Здравствуйте?', 'surprised');
   yield say(L, 'pryanik', 'Неверно. Пароль — «пожалуйста». Ну да ладно, вежливых пускаем и так. Проходите!');
-  if (pry) { pry.g.position.set(-3.4, 0, 51.6); pry.homeYaw = 2.6; }
-  yield all(L.shot(V(0.2, 2.0, 52.2), V(0.1, 1.0, 56.6), 1.0), walkFig(tosha, -0.6, 54.4, 2.0), walkFig(bublik, 0.9, 54.8, 2.0));
+  // (he steps aside, still in the picture with the two — at his post by the wall he talked from behind the camera)
+  if (pry) { pry.g.position.set(-2.3, 0, 53.3); pry.g.rotation.y = 1.25; pry.homeYaw = 1.25; }
+  yield all(L.shot(V(0.9, 2.0, 50.3), V(-0.6, 1.0, 54.4), 1.0), walkFig(tosha, -0.6, 54.4, 2.0), walkFig(bublik, 0.9, 54.8, 2.0));
   bublik.anim.expr = 'happy';
   yield say(L, 'bublik', 'Тоша, тут пахнет пастилой, пряниками и зефиром. Я что, в раю?', 'happy');
   yield say(L, 'pryanik', 'Вы в Пастильном королевстве. Рай — это дальше, в пекарне у Мадам Безе.');
@@ -908,6 +910,7 @@ function* hubArrival(L: Level3D): Script {
   yield say(L, 'bublik', '…Кажется, она дома.');
   yield wait(0.2);
   hub.dropFigure('tosha'); hub.dropFigure('bublik');
+  if (pry) { pry.g.position.set(-3.4, 0, 51.6); pry.g.rotation.y = 2.6; pry.homeYaw = 2.6; }
   L.cutscene(false);
   yield L.camBack(0.6);
   L.hud.showChapter(L.def.title, L.def.subtitle);

@@ -3,7 +3,7 @@ import { basic, noOutline } from '../../../gfx';
 import type { Rig } from '../../../models/rig';
 import { G, Mats, TAU, clamp, damp, grp, part, cached, merge, surf } from '../../../models/kit';
 import { buildToonFace, type ToonFace } from '../../../models/toonFace';
-import { flatten, puffGeo } from '../../../models/toonKit';
+import { flatten, puffGeo, disposeBaked } from '../../../models/toonKit';
 import type { HeroExpr } from '../../../models/hero';
 import { latheC } from '../../../world/kit';
 import { marshTex, gingerTex, caneTex, stripeTex, layersTex } from './tex';
@@ -433,7 +433,7 @@ export function createFolk(kind: FolkKind, look: FolkLook = {}): FolkRig {
         greyMats.forEach((m, k) => m.color.copy(baseColors[k]).lerp(toonGrey, g * 0.85));
       }
     },
-    dispose() { for (const m of M.all) m.dispose(); face.dispose(); sootM?.dispose(); },
+    dispose() { for (const m of M.all) m.dispose(); face.dispose(); sootM?.dispose(); disposeBaked(root); },
   };
 }
 

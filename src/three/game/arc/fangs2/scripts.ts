@@ -149,7 +149,8 @@ const SCRIPTS: Record<string, (L: Level3D) => Script> = {
     const c = cast(L);
     L.cutscene(true);
     const hum = MARK.fakeHummock;
-    stage(L, { tosha: [-2.2, 0.7, -130.0], bublik: [-3.8, 0.7, -130.4], pastila: [-1.0, 0.7, -131.4], noki: [-4.9, 0.7, -131.9] }, hum);
+    // (Бублик clear of the launch step's box, x −4.6…−3.6, z −130.6…−129.6: it is hidden for the scene but still solid)
+    stage(L, { tosha: [-2.2, 0.7, -130.0], bublik: [-3.4, 0.7, -131.0], pastila: [-1.0, 0.7, -131.4], noki: [-4.9, 0.7, -131.9] }, hum);
     // the fake Бублик on the hummock: no shadow at all
     const fake = createHeroModel('bublik');
     fake.root.traverse((o) => { o.castShadow = false; });
