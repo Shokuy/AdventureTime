@@ -16,3 +16,4 @@ build/
 .env.*
 *.pem
 *.key
+*.log
