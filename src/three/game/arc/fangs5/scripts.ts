@@ -1071,6 +1071,12 @@ function flowActor(L: Level3D) {
   const hint = new THREE.Vector3();
   return {
     update(L2: Level3D, dt: number) {
+      // the chained scenes (cold open → the gate; the morning → the letter): the host starts the next one once the
+      // previous is over — here in a persistent actor too (in co-op the scene's own follow-up coroutine never ran)
+      if (L2.authority && !L2.storyOn() && !L2.inCutscene && !(L2.nl && L2.nl.waiting)) {
+        if (L2.seen.has('fangs5_cold') && !L2.seen.has('fangs5_intro')) L2.run('fangs5_intro');
+        else if (L2.seen.has('exit_fangs5_castle') && !L2.seen.has('exit_fangs5_letter')) L2.run('exit_fangs5_letter');
+      }
       const siege = L2.refs.f5siege as { won: boolean } | undefined;
       const candles = L2.refs.f5candles as { solved: boolean; n: number } | undefined;
       const arena = L2.arenas[0];
