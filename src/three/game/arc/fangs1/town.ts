@@ -322,7 +322,7 @@ export class NightTown {
     this.buildEast();
     this.buildSecrets();
     // candles
-    L.cp(-6.2, 0, -2.4); // (off the contest's half-ring in front of the jury stage)
+    L.cp(-3.0, 0, -8.6); // (clear of the contest's half-ring in front of the jury stage)
     L.cp(2.6, 0, 26.0);
     L.cp(-29.4, 0, 14.2);
     L.cp(-19.5, 0, -22.4);
@@ -542,7 +542,7 @@ export class NightTown {
       this.contest.set(k.id, pl);
     }
     folk('c', 'cupcake', { color: '#ffc8e0', accent: '#9a6ad8', hat: 'chef' }, V(-4.1, 0, 4.4), 1.2); // (off the fountain's rim)
-    folk('d', 'marsh', { color: '#ffd6e4', hat: 'kerchief', accent: '#ff5a8a' }, V(-2.2, 0, -8.4), 0.2, 'cheer');
+    folk('d', 'marsh', { color: '#ffd6e4', hat: 'kerchief', accent: '#ff5a8a' }, V(1.2, 0, -8.6), -0.3, 'cheer');
     // the judge: the Count standing on the stage, facing the square (a figure for the scene; the boss is on the roofs)
     // — he casts no shadow (§5.1 К5: «у гостя нет тени»)
     const rig = createCount();

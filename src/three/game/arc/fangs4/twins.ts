@@ -120,8 +120,8 @@ export class Twins implements Boss3Like, Netted, Actor3 {
   private argueT = 0;
   private argued = -1;
   private quarrelQ: [SisterKind, string][] = [];
-  /** phase 3: the room-clock time the stone's cycle started (−1: not yet); replicated */
-  lightT0 = -1;
+  /** phase 3: the room-clock time the stone's cycle started (−1e9: not yet); replicated */
+  lightT0 = -1e9;
   /** what the stone shows now (every machine computes it from lightT0) */
   signal: Signal = 'off';
   private lastSignal: Signal = 'off';
@@ -227,8 +227,11 @@ export class Twins implements Boss3Like, Netted, Actor3 {
   }
 
   // ───────────────────────── per frame ─────────────────────────
+  /** a cutscene stages the sisters itself (the defeat): neither the fight nor the host's snapshots move them */
+  staged = false;
   update(L: Level3D, dt: number) {
-    if (L.authority) {
+    if (this.staged) { for (const s of this.sis) { s.actT += dt; s.talk = Math.max(0, s.talk - dt * 3); s.flash = Math.max(0, s.flash - dt * 5); } }
+    else if (L.authority) {
       // co-op: I just became the host mid-fight — carry on from what I was showing
       if (this.wasPuppet) { this.wasPuppet = false; this.takeOver(); }
       this.host(L, dt);
@@ -384,7 +387,7 @@ export class Twins implements Boss3Like, Netted, Actor3 {
   }
   /** every machine: what the stone shows (from the replicated start), its sounds, the floor's colour */
   private lights(L: Level3D, dt: number) {
-    const on = this.phase === 3 && this.lightT0 >= 0 && this.mode === 'light';
+    const on = this.phase === 3 && this.lightT0 > -1e8 && this.mode === 'light';
     const sig: Signal = on ? lightAt(clk(L) - this.lightT0) : 'off';
     if (sig !== this.signal) {
       if (sig === 'yellow') ambient(L, () => audio.sfx('warn'));
@@ -397,7 +400,7 @@ export class Twins implements Boss3Like, Netted, Actor3 {
     if (this.floor.visible) {
       this.floorM.color.set(SIGNAL_COLOR[sig as Exclude<Signal, 'off'>]);
       const blink = sig === 'yellow' ? (Math.sin(L.t * 18) > 0 ? 1 : 0.3) : 1;
-      this.floorM.opacity = damp(this.floorM.opacity, (sig === 'red' ? 0.16 : 0.1) * blink, 10, dt);
+      this.floorM.opacity = damp(this.floorM.opacity, (sig === 'red' ? 0.12 : 0.07) * blink, 10, dt);
     }
   }
 

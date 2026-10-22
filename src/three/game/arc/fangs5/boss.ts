@@ -4,7 +4,7 @@ import { save } from '../../../../engine/save';
 import { choose, clamp, damp, lerp, rand, W, H } from '../../../../engine/util';
 import { rrect, text } from '../../../../art/draw';
 import { net } from '../../../../net/session';
-import { basic, noOutline } from '../../../gfx';
+import { basic, canvasTex, noOutline } from '../../../gfx';
 import { makeBlob } from '../../../fx';
 import { createHeroModel, type HeroKind } from '../../../models/heroes';
 import type { HeroRig, HeroAnim, HeroAtk } from '../../../models/hero';
@@ -47,6 +47,14 @@ import { F5 } from './lines';
  */
 
 const NET_ID = 950;
+/** (v2) Ноки's shadow at the cannon: the girl's silhouette in a pale violet (a black one was lost on the dark roof) */
+let violetC: THREE.Texture | null = null;
+function violetGirl() {
+  if (violetC) return violetC;
+  const img = girlTex().image as HTMLCanvasElement;
+  violetC = canvasTex(img.width, img.height, (g, w, h) => { g.drawImage(img, 0, 0, w, h); g.globalCompositeOperation = 'source-in'; g.fillStyle = '#c8a8ff'; g.fillRect(0, 0, w, h); });
+  return violetC;
+}
 export const ROOF = { x: 0, y: 38, z: -118, r: 18 };
 export const CANNON_AT = new THREE.Vector3(-6, 38, -101.6);
 export const PASTILA_AT = new THREE.Vector3(-3.9, 38, -102.2);
@@ -271,7 +279,10 @@ export class Midnight3 implements Boss3Like, Netted {
     }
     this.shotBeam = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.6, 1, 20, 1, true), basic('#ffd040', { additive: true, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, fog: false }));
     this.shotBeam.visible = false; noOutline(this.shotBeam); L.scene.add(this.shotBeam);
-    this.girlHold = new THREE.Mesh(new THREE.PlaneGeometry(1.25, 1.9).translate(0, 0.95, 0), new THREE.MeshBasicMaterial({ map: girlTex(), transparent: true, opacity: 0, depthWrite: false, color: '#7a5ac8', side: THREE.DoubleSide }));
+    this.girlHold = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 2.6).translate(0, 1.3, 0), new THREE.MeshBasicMaterial({ map: violetGirl(), transparent: true, opacity: 0, depthWrite: false, color: '#ffffff', side: THREE.DoubleSide }));
+    // (a violet glow behind her: a black silhouette alone was lost against the dark roof)
+    const halo = new THREE.Mesh(new THREE.PlaneGeometry(2.6, 3.4).translate(0, 1.4, -0.02), new THREE.MeshBasicMaterial({ map: canvasTex(64, 64, (g) => { const r = g.createRadialGradient(32, 32, 2, 32, 32, 32); r.addColorStop(0, 'rgba(255,255,255,1)'); r.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = r; g.fillRect(0, 0, 64, 64); }), transparent: true, opacity: 0.85, depthWrite: false, color: '#a070ff', blending: THREE.AdditiveBlending, side: THREE.DoubleSide }));
+    halo.renderOrder = -1; noOutline(halo); this.girlHold.add(halo);
     this.girlHold.visible = false; noOutline(this.girlHold); L.scene.add(this.girlHold);
     // health: the room's difficulty, the party
     const base = coop.easy ? 135 : 180;
@@ -1429,10 +1440,11 @@ export class Midnight3 implements Boss3Like, Netted {
     const held = this.hands.find((h) => h.on && h.act === 'held' && (this.state === 'shadow' || this.state === 'shot'));
     const gm = this.girlHold.material as THREE.MeshBasicMaterial;
     gm.opacity = Math.max(0, Math.min(0.92, gm.opacity + (held ? dt * 3 : -dt * 2)));
+    ((this.girlHold.children[0] as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = gm.opacity * 0.9;
     this.girlHold.visible = gm.opacity > 0.01;
     if (held) {
       tmp.set(PASTILA_AT.x - held.pos.x, 0, PASTILA_AT.z - held.pos.z).normalize();
-      this.girlHold.position.set(held.pos.x + tmp.x * 0.85, ROOF.y + 0.02, held.pos.z + tmp.z * 0.85);
+      this.girlHold.position.set(held.pos.x + tmp.x * 1.5, ROOF.y + 0.02, held.pos.z + tmp.z * 1.5);
       const cam = L.tcam.cam.position;
       this.girlHold.rotation.set(0, Math.atan2(cam.x - this.girlHold.position.x, cam.z - this.girlHold.position.z), Math.sin(this.t * 9) * 0.06 - 0.12);
       if (Math.random() < 0.3) ambient(L, () => L.fx.emit(this.girlHold.position.clone().setY(ROOF.y + 1), { count: 1, speed: [0.3, 1], life: [0.5, 0.9], size: [0.15, 0.3], colors: ['#b890ff', '#ffffff'], g: -1, drag: 1 }));

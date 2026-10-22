@@ -19,6 +19,7 @@ export class KingMirror {
   readonly pos: THREE.Vector3;
   panel: Panel;
   private glass: THREE.Mesh;
+  private back!: THREE.Mesh;
   private glassM: THREE.MeshBasicMaterial;
   private face: THREE.Mesh;
   private faceM: THREE.MeshBasicMaterial;
@@ -53,6 +54,7 @@ export class KingMirror {
     const back = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.1, h - 0.4), mirrorFaceMat());
     back.position.set(x, h / 2 + 0.1, z - 0.14); back.rotation.y = Math.PI;
     noOutline(back); L.deco(back);
+    this.back = back;
     this.cv = document.createElement('canvas'); this.cv.width = 256; this.cv.height = 352;
     this.tex = new THREE.CanvasTexture(this.cv); this.tex.colorSpace = THREE.SRGBColorSpace;
     this.faceM = new THREE.MeshBasicMaterial({ map: this.tex, transparent: true, opacity: 0, depthWrite: false });
@@ -89,6 +91,9 @@ export class KingMirror {
     this.face.visible = on;
     if (!on) { if (this.glow) this.glow.intensity = 0; return; }
     this.faceM.opacity = this.king;
+    // (fully there: opaque and writing depth, so nothing behind the mirror shows through his face)
+    const see = this.king < 0.99;
+    if (this.faceM.transparent !== see) { this.faceM.transparent = see; this.faceM.depthWrite = !see; this.faceM.needsUpdate = true; }
     // (redrawn ~30 times a second while he is there)
     if (this.t - this.drawnT > 0.033) { this.drawnT = this.t; this.paint(); }
   }
@@ -117,7 +122,7 @@ export class KingMirror {
     if (this.broken) return;
     this.broken = true;
     this.king = 0;
-    this.glass.visible = false; this.face.visible = false;
+    this.glass.visible = false; this.face.visible = false; this.back.visible = false;
     this.stubs.visible = true;
     this.col.active = false;
     this.panel.fake = true;

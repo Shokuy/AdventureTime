@@ -49,7 +49,7 @@ export function say(L: Level3D, who: Spk, str: string, expr?: string): Waiter {
   install(L);
   const s = st(L);
   s.who = who; s.str = str;
-  if (who === 'shepot' || who === 'polnoch') return L.say('narrator', str, expr);
+  if (who === 'shepot' || who === 'polnoch') return townSay(L, 'narrator', str, expr); // (the town's speaker map forgets the last one)
   return townSay(L, who, str, expr);
 }
 
@@ -58,6 +58,8 @@ export function say(L: Level3D, who: Spk, str: string, expr?: string): Waiter {
 export function castMouths(L: Level3D) {
   const d = L.dialog, s = state.get(L);
   if (!s || !d.active || d.str !== s.str || d.shown >= d.str.length) return;
+  // (a voice from the air / the mirror: nobody on stage moves their mouth)
+  if (s.who === 'shepot' || s.who === 'polnoch' || s.who === 'narrator') { for (const k of ['tosha', 'bublik', 'noki', 'pastila']) { const m = L.npcs[k]; if (m) m.talk = 0; } return; }
   const n = L.npcs[s.who];
   if (n && (s.who === 'pastila' || s.who === 'noki')) n.talk = 0.35;
 }

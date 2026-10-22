@@ -13,7 +13,7 @@ import { net } from '../../../../net/session';
 export type CastKind = 'tosha' | 'bublik' | 'noki' | 'pastila';
 export const CAST: CastKind[] = ['tosha', 'bublik', 'noki', 'pastila'];
 
-interface Walk { to: THREE.Vector3; speed: number; t: number; max: number }
+interface Walk { to: THREE.Vector3; speed: number; t: number; max: number; next?: [number, number][] }
 
 export class Cast {
   figs = {} as Record<CastKind, Npc3>;
@@ -50,6 +50,14 @@ export class Cast {
     this.walks.set(k, { to: new THREE.Vector3(x, r.position.y, z), speed, t: 0, max });
     return { update: () => !this.walks.has(k) };
   }
+  /** walk through waypoints (round the props, not through them); a Waiter for the whole way, and it goes on by
+   *  itself whether or not the script waits on it */
+  route(k: CastKind, pts: [number, number][], speed = 2.4): Waiter {
+    const r = this.figs[k].root;
+    const [x, z] = pts[0];
+    this.walks.set(k, { to: new THREE.Vector3(x, r.position.y, z), speed, t: 0, max: 10, next: pts.slice(1) });
+    return { update: () => !this.walks.has(k) };
+  }
   pos(k: CastKind) { return this.figs[k].root.position; }
   head(k: CastKind, out = new THREE.Vector3()) { return out.copy(this.figs[k].root.position).setY(this.figs[k].root.position.y + (k === 'bublik' ? 0.8 : 1.2)); }
 
@@ -60,7 +68,12 @@ export class Cast {
       if (w) {
         w.t += dt;
         const d = Math.hypot(w.to.x - r.position.x, w.to.z - r.position.z);
-        if (d < 0.08 || w.t > w.max) { r.position.x = w.to.x; r.position.z = w.to.z; this.walks.delete(k); a.state = 'idle'; a.speed = 0; }
+        if (d < 0.08 || w.t > w.max) {
+          r.position.x = w.to.x; r.position.z = w.to.z;
+          const nx = w.next?.shift();
+          if (nx) { w.to.set(nx[0], r.position.y, nx[1]); w.t = 0; continue; }
+          this.walks.delete(k); a.state = 'idle'; a.speed = 0;
+        }
         else {
           const s = Math.min(d, w.speed * dt);
           r.position.x += ((w.to.x - r.position.x) / d) * s; r.position.z += ((w.to.z - r.position.z) / d) * s;

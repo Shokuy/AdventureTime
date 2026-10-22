@@ -376,12 +376,13 @@ export function createTether(): Tether {
   let snapped = false, t = 0, snapT = 0;
   const p = new THREE.Vector3(), q = new THREE.Vector3(), c = new THREE.Vector3(), d = new THREE.Vector3(), side = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
   const bez = (a: THREE.Vector3, ctl: THREE.Vector3, b: THREE.Vector3, u: number, out: THREE.Vector3) => out.set(0, 0, 0).addScaledVector(a, (1 - u) * (1 - u)).addScaledVector(ctl, 2 * u * (1 - u)).addScaledVector(b, u * u);
-  /** fill one half: from `from` along the curve (from → ctl → to) */
-  const fill = (h: (typeof halves)[number], from: THREE.Vector3, ctl: THREE.Vector3, to: THREE.Vector3, flutter: number) => {
+  /** fill one half: the part u0 → u1 of the curve (from → ctl → to) */
+  const fill = (h: (typeof halves)[number], from: THREE.Vector3, ctl: THREE.Vector3, to: THREE.Vector3, flutter: number, u0 = 0, u1 = 1) => {
     for (let i = 0; i <= N; i++) {
-      const u = i / N;
+      const u = u0 + (u1 - u0) * (i / N);
       bez(from, ctl, to, u, p);
-      bez(from, ctl, to, Math.min(1, u + 0.02), q);
+      bez(from, ctl, to, u + (u1 > u0 ? 0.02 : -0.02), q);
+      if (u1 < u0) q.sub(p).multiplyScalar(-1).add(p);
       d.copy(q).sub(p); if (d.lengthSq() < 1e-8) d.set(0, -1, 0);
       side.copy(d).cross(up); if (side.lengthSq() < 1e-6) side.set(1, 0, 0);
       side.normalize().multiplyScalar(W * (1 + 0.3 * Math.sin(t * 9 + i)));
@@ -406,9 +407,8 @@ export function createTether(): Tether {
         // one arch over both (the middle sways a little in the wind)
         c.y += 0.45 * dist + 0.15 + Math.sin(t * 2.3) * 0.05;
         const mid = bez(a, c, b, 0.5, new THREE.Vector3());
-        const ca = new THREE.Vector3().copy(a).lerp(c, 0.5), cb = new THREE.Vector3().copy(b).lerp(c, 0.5);
-        fill(halves[0], a, ca, mid, 0);
-        fill(halves[1], b, cb, mid, 0);
+        fill(halves[0], a, c, b, 0, 0, 0.5);
+        fill(halves[1], a, c, b, 0, 1, 0.5);
         halves[0].end.copy(mid); halves[1].end.copy(mid);
         halves[0].vel.set(0, 0, 0); halves[1].vel.set(0, 0, 0);
         return;
@@ -448,7 +448,7 @@ export function createKingdomLights(glowTexture: THREE.Texture): { root: THREE.G
     const m = new THREE.SpriteMaterial({ map: glowTexture, color: pal[i % pal.length], blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.95, fog: false });
     const s = new THREE.Sprite(m);
     s.position.set(x, Math.max(0, 12 - r * 0.18) + R() * 2, z);
-    s.scale.setScalar(2.2 + R() * 2.2);
+    s.scale.setScalar(4 + R() * 4);
     noOutline(s);
     root.add(s);
     // they go out from the castle's side (−Z, north) toward the south

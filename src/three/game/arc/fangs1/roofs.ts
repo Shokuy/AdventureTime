@@ -12,6 +12,7 @@ import { cobbleTex, marshTex, layersTex, sprinkleTex, stripeTex, caneTex } from 
 import { vamp, type VampKit, type Lantern } from '../vampires';
 import { Cast } from './cast';
 import { Count3 } from './boss';
+import { createCount, type CountRig, type CountAnim } from './bossRig';
 import { Squirter, companion } from './common';
 import { TITLE, DEATH, SIGNS, BARK } from './lines';
 
@@ -64,6 +65,7 @@ export class Roofs {
   private deco: Built[] = [];
   private t = 0;
   private retried = false;
+  private sipper: RoofSipper | null = null;
 
   constructor(readonly L: Level3D) {
     L.refs.f1roofs = this;
@@ -100,6 +102,7 @@ export class Roofs {
     // the boss fight begins on the dome
     if (!L.seen.has('fangs1_boss_intro')) L.trigger(HALL.c.x - 4, 12.5, HALL.c.z + 8.5, HALL.c.x + 4, 18, HALL.c.z + 12.6, 'fangs1_boss_intro');
     this.squirt = new Squirter(L);
+    if (!L.seen.has('fangs1_boss_intro')) this.sipper = new RoofSipper(L);
     L.updaters.push((_t, dt) => this.update(dt));
     L.overlayDraw.push((ctx) => this.squirt.draw(ctx));
   }
@@ -390,5 +393,65 @@ export class Roofs {
       if (Math.hypot(p.x + 21.5, p.z + 30) < 5) companion(L, 'r_tosha_go', 'tosha', BARK.tosha[0]);
     }
     this.squirt.update(dt);
+    this.sipper?.update(dt);
+  }
+}
+
+/**
+ * v2 §5.4: ahead on the way the Count sits on a roof and drinks its tiles through a straw (the roof is grey already);
+ * when a hero comes near he calls out («Ах, черепица! Розовая!»…) and flies on to the next roof — then home to his
+ * weathervane over the dome (where the boss waits). A look on every machine (driven by where the heroes are).
+ */
+class RoofSipper {
+  private rig: CountRig;
+  private g = new THREE.Group();
+  private anim: CountAnim = { st: 'sip', p: 0, flash: 0, talk: 0, small: 0, glow: 0.3, speed: 0 };
+  private spots = [V(29, 10.6, -30.6), V(-4.5, 13.0, -31.2), HALL.perch.clone()];
+  private i = 0;
+  private fly: { from: THREE.Vector3; to: THREE.Vector3; t: number } | null = null;
+  private sipT = 0;
+  constructor(private L: Level3D) {
+    this.rig = createCount();
+    this.rig.root.scale.setScalar(1.25);
+    this.rig.root.traverse((o) => { o.castShadow = false; });
+    this.rig.lining(2);
+    this.g.add(this.rig.root);
+    this.g.position.copy(this.spots[0]);
+    this.g.rotation.y = Math.PI / 2;
+    L.scene.add(this.g);
+  }
+  update(dt: number) {
+    const L = this.L;
+    if (!this.g.parent) return;
+    if (this.fly) {
+      const f = this.fly;
+      f.t = Math.min(1, f.t + dt / 2.4);
+      const k = f.t * f.t * (3 - 2 * f.t);
+      this.g.position.lerpVectors(f.from, f.to, k);
+      this.g.position.y += Math.sin(k * Math.PI) * 4;
+      this.g.rotation.y = Math.atan2(f.to.x - f.from.x, f.to.z - f.from.z);
+      if (f.t >= 1) {
+        this.fly = null;
+        if (this.i >= this.spots.length - 1) { L.scene.remove(this.g); return; }
+        this.anim.st = 'sip';
+        this.g.rotation.y = Math.atan2(-this.g.position.x, -this.g.position.z);
+      }
+    } else {
+      // sipping: a little pink of the tiles goes up the straw now and then
+      if ((this.sipT -= dt) <= 0) {
+        this.sipT = 0.12;
+        const p = this.g.position;
+        L.fx.emit(V(p.x + Math.sin(this.g.rotation.y) * 0.9, p.y + 0.3, p.z + Math.cos(this.g.rotation.y) * 0.9), { count: 1, speed: [0.3, 0.8], dir: V(0, 1, 0), spread: 0.3, life: [0.3, 0.5], size: [0.06, 0.12], colors: ['#ff8ab8', '#ffd0e0'], g: -1, drag: 2 });
+      }
+      const near = L.alivePlayers().some((h) => h.pos.distanceTo(this.g.position) < 13);
+      if (near && !L.inCutscene) {
+        const s = BARK.countFar[this.i % BARK.countFar.length];
+        L.bark(this.g, s, 2.6, 3.0);
+        audio.sfx('batFlap', { pitch: 0.7, volume: 0.6 });
+        this.fly = { from: this.g.position.clone(), to: this.spots[++this.i].clone(), t: 0 };
+        this.anim.st = 'fly';
+      }
+    }
+    this.rig.update(dt, this.anim);
   }
 }

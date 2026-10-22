@@ -136,6 +136,8 @@ export class Morok3 implements Boss3Like, Netted {
   onWindow: ((n: number) => void) | null = null;
   /** «Две Ноки» is on (phase 3 copy) */
   twoNoki = false;
+  /** «Две Ноки» was won (she was found out in it): until then she can't fall — the twist always plays */
+  twoNokiDone = false;
   private windowsN = 0;
   private visAct: Act = 'sit';
   private visSeq = -1;
@@ -216,6 +218,10 @@ export class Morok3 implements Boss3Like, Netted {
     this.hp = this.maxHp = Math.round(base * (L.nl ? coop.hpScale() : 1));
     if (L.nl) { let id = NET_ID; while (L.nl.get(id)) id++; L.nl.add(this, id); }
     this.place(0);
+    // Кар-Карыч starts on her shoulder (not at the origin until her first update)
+    this.ladyG.updateMatrixWorld(true);
+    this.voronG.position.copy(this.lady.body.localToWorld(SHOULDER.clone()));
+    this.voronG.scale.setScalar(0.62); this.voronG.rotation.y = this.yaw;
     L.overlayDraw.push((ctx) => this.drawFakeTag(ctx));
   }
 
@@ -292,6 +298,8 @@ export class Morok3 implements Boss3Like, Netted {
     this.visuals(L, dt);
   }
   private setFormRaw(f: Form) { this.form = f; this.st = 0; }
+  /** scenes before the fight (L.boss is not set yet, nobody updates her): just her looks — the chair, the raven, the pose */
+  sceneLooks(L: Level3D, dt: number) { if (L.boss !== this) this.visuals(L, dt); }
 
   private think(L: Level3D, dt: number) {
     const sp = this.spd;
@@ -308,7 +316,7 @@ export class Morok3 implements Boss3Like, Netted {
           if (this.at <= 0) {
             // phase 3 «Кто из вас я?»: the copy comes every other time (the first one at once)
             let f = CYCLE[this.cycleI % CYCLE.length];
-            if (this.phase === 3 && f !== 'copy' && this.lastCycle !== 'copy') f = 'copy'; else this.cycleI++;
+            if (this.phase === 3 && f !== 'copy' && (this.lastCycle !== 'copy' || !this.twoNokiDone)) f = 'copy'; else this.cycleI++;
             this.lastCycle = f;
             this.setForm(f); this.enter(L, f);
           }
@@ -695,6 +703,7 @@ export class Morok3 implements Boss3Like, Netted {
     this.bark(choose(MOROK.caught));
     L.nl?.entEvent(this, 'unmask', { h: how });
     this.unmaskFx(L, how);
+    if (this.twoNoki) this.twoNokiDone = true;
     if (how === 'hit') this.hurt(L, 2, this.center(), by, true);
     if ((this.form as Form) !== 'dead') this.window(L);
     this.twoNoki = false;
@@ -904,7 +913,11 @@ export class Morok3 implements Boss3Like, Netted {
         dmg = 1;
       }
       dmg = Math.max(1, Math.round(dmg));
-      this.hp = Math.max(0, this.hp - dmg);
+      // the twist must play: no knock-out before «Две Ноки» is won (test tooling's 9999 still ends her)
+      const keep = !this.twoNokiDone && dmg < 999;
+      this.hp = Math.max(keep ? 1 : 0, this.hp - dmg);
+      // phase 3 reached in a window: the window ends — she goes for the copy at once
+      if (keep && this.phase === 3 && this.form === 'lady' && this.act === 'dazed') { this.go('taunt', 0.7); this.morphFx(); }
       this.flash = 1;
       audio.sfx(open ? 'bossHit' : 'hit', { pitch: open ? 1.2 : 1.4 });
       L.fx.sparks(at.clone(), open ? 14 : 6, ['#ffffff', '#c060ff', '#ffe14a']);

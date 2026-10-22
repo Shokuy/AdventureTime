@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { clamp } from '../../../../engine/util';
 import { basic, canvasTex, noOutline } from '../../../gfx';
 import { G, part, Mats } from '../../../models/kit';
@@ -105,6 +106,8 @@ export interface Feast {
   setAway(k: number): void;
   /** a scene animates it: the per-frame rule (gone while the King fights) steps aside */
   hold: boolean;
+  /** dragged off for the fight (the per-frame rule keeps it away) */
+  gone: boolean;
 }
 
 export function buildFeast(L: Level3D): Feast {
@@ -129,12 +132,16 @@ export function buildFeast(L: Level3D): Feast {
       part(root, G.cyl(), M.get('#9c98a8'), [x, TABLE.h + 0.04, z], [0.13, 0.01, 0.13]);
       // the place card (a little tent, its name toward the chair)
       const name = F5.placeCards[ci++ % F5.placeCards.length];
-      const card = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.13), new THREE.MeshBasicMaterial({ map: cardTex(name), side: THREE.DoubleSide }));
-      card.position.set(x - s * 0.2, TABLE.h + 0.1, z);
-      card.rotation.set(0, s * Math.PI / 2, 0);
-      card.rotateX(-0.25);
-      noOutline(card);
-      root.add(card);
+      // (a tent: the name on both faces, each readable from its own side — a double-sided plane showed it mirrored)
+      const cm = new THREE.MeshBasicMaterial({ map: cardTex(name) });
+      for (const side of [1, -1]) {
+        const card = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.13), cm);
+        card.position.set(x - s * 0.2 + side * s * 0.016, TABLE.h + 0.1, z);
+        card.rotation.set(0, side * s * Math.PI / 2, 0);
+        card.rotateX(-0.25);
+        noOutline(card);
+        root.add(card);
+      }
       // a knife and a fork
       part(root, BOXG, M.get('#c8c8d4'), [x, TABLE.h + 0.02, z + 0.3], [0.03, 0.01, 0.22]);
       part(root, BOXG, M.get('#c8c8d4'), [x, TABLE.h + 0.02, z - 0.3], [0.03, 0.01, 0.22]);
@@ -179,10 +186,12 @@ export function buildFeast(L: Level3D): Feast {
   // it stands where you could walk into it: a collider while it is there
   const col: BoxCol = { kind: 'box', min: new THREE.Vector3(TABLE.x - TABLE.w / 2 - 0.1, ROOF.y, TABLE.z1), max: new THREE.Vector3(TABLE.x + TABLE.w / 2 + 0.1, ROOF.y + TABLE.h, TABLE.z0) };
   L.col(col);
+  // (a few hundred little parts: merged by material into a handful of meshes — the roof is drawn every frame of the fight)
+  mergeStatic(root, [pie.root, knife]);
   root.traverse((o) => { if ((o as THREE.Mesh).isMesh) (o as THREE.Mesh).castShadow = true; });
   L.scene.add(root);
   const f: Feast = {
-    root, pie, knife, away: 0, hold: false,
+    root, pie, knife, away: 0, hold: false, gone: false,
     setAway(k: number) {
       k = clamp(k, 0, 1);
       f.away = k;
@@ -194,3 +203,31 @@ export function buildFeast(L: Level3D): Feast {
   return f;
 }
 void TAU;
+
+/** merge the static meshes under `root` (not under `keep`) into one mesh per material */
+function mergeStatic(root: THREE.Group, keep: THREE.Object3D[]) {
+  root.updateMatrixWorld(true);
+  const inv = root.matrixWorld.clone().invert();
+  const groups = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  const drop: THREE.Mesh[] = [];
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh || Array.isArray(m.material)) return;
+    for (let p: THREE.Object3D | null = m; p && p !== root; p = p.parent) if (keep.includes(p)) return;
+    let g = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+    for (const k of Object.keys(g.attributes)) if (k !== 'position' && k !== 'normal' && k !== 'uv') g.deleteAttribute(k);
+    if (!g.attributes.uv) { g = g.clone(); g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2)); }
+    g.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inv, m.matrixWorld));
+    const list = groups.get(m.material) ?? [];
+    list.push(g); groups.set(m.material, list);
+    drop.push(m);
+  });
+  for (const m of drop) m.removeFromParent();
+  for (const [mat, list] of groups) {
+    const g = mergeGeometries(list, false);
+    if (!g) continue;
+    const mesh = new THREE.Mesh(g, mat);
+    if ((mat as THREE.MeshBasicMaterial).isMeshBasicMaterial) noOutline(mesh);
+    root.add(mesh);
+  }
+}

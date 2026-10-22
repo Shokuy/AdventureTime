@@ -3,15 +3,18 @@ import { audio } from '../../../../engine/audio';
 import { ease } from '../../../../engine/util';
 import { wait, tween, all, until, type Script, type Waiter } from '../../../../game/coroutine';
 import { glyphLabel } from '../../../../ui/glyphs';
-import { createBat } from '../vampires/models';
 import { ambient } from '../vampires/fxUtil';
+import { createMouse, type MouseAnim } from '../fangs5/rigs';
+import { safeMark, clearMarks } from '../shared/safeMark';
+import { setStoryFlag } from '../../episodes';
 import type { Level3D } from '../../level';
-import { Garden, MARKS, LEVEL_ID } from './level';
+import { Garden, MARKS, LEVEL_ID, COURT_BED, CAN_DROPPED } from './level';
 import { Cast, CAST, slotOf, type CastKind } from './cast';
-import { say, shepotSeen } from './speech';
+import { say, shepotSeen, NAMED } from './speech';
 import { Shepot3, ARENA } from './boss';
 import { showCard } from './card';
-import { BANNER, TOAST, RETRY } from './lines';
+import { mirrorFaceMat } from './mirrors';
+import { BANNER, NIGHT, TOAST, RETRY } from './lines';
 
 /*
  * The scenes of «Стеклянная оранжерея» (docs/script-fangs.md §7). Co-op: the host runs them (L.run) and every
@@ -24,8 +27,39 @@ type ScriptFn = (L: Level3D) => Script;
 const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 const G = (L: Level3D) => L.refs.garden as Garden;
 
-function marks(c: Cast, set: Record<CastKind, readonly [number, number, number]>, y = 0) {
-  for (const k of CAST) { const [x, z, yaw] = set[k]; c.place(k, x, y, z, yaw); }
+/** a mark through safeMark (v2 §0: never inside a wall / prop / under a roof); returns [x, y, z] */
+function placeAt(L: Level3D, v: THREE.Vector3, label: string, wall = 0.9): [number, number, number] {
+  const p = safeMark(L, v, { wall, label: 'fangs3 ' + label });
+  return [p.x, p.y, p.z];
+}
+function marks(L: Level3D, c: Cast, set: Record<CastKind, readonly [number, number, number]>, y = 0) {
+  for (const k of CAST) { const [x, z, yaw] = set[k]; c.place(k, ...placeAt(L, V(x, y, z), k), yaw); }
+}
+/** §7.3: the four round the bed (about 2 m off its edge), facing the middle */
+function ringMarks(L: Level3D, c: Cast) {
+  const C = ARENA.c, r = 4.7;
+  const ang: Record<CastKind, number> = { tosha: -1.9, bublik: -0.62, pastila: 0.62, noki: 1.9 };
+  for (const k of CAST) {
+    const a = ang[k];
+    c.place(k, ...placeAt(L, V(C.x + Math.sin(a) * r, 0, C.z + Math.cos(a) * r), k, 0.8), a + Math.PI);
+  }
+}
+/** a two-shot: `a` (who speaks) and `b`, from the side so both faces read */
+function two(L: Level3D, c: Cast, a: CastKind, b: CastKind, awayFrom?: THREE.Vector3): Waiter {
+  const pa = c.head(a), pb = c.head(b);
+  const mid = pa.clone().lerp(pb, 0.45);
+  const across = V(pb.x - pa.x, 0, pb.z - pa.z);
+  const d = Math.max(1.2, across.length());
+  across.normalize();
+  // the side the two are facing (their average forward)
+  const ya = c.figs[a].root.rotation.y, yb = c.figs[b].root.rotation.y;
+  const f = V(Math.sin(ya) + Math.sin(yb), 0, Math.cos(ya) + Math.cos(yb));
+  if (f.lengthSq() < 0.01) f.set(-across.z, 0, across.x);
+  // (round a prop — the bed: from its far side, never across it)
+  if (awayFrom) f.set(mid.x - awayFrom.x, 0, mid.z - awayFrom.z);
+  f.normalize();
+  const pos = mid.clone().addScaledVector(f, 1.6 + d * 0.9).addScaledVector(across, -0.4).setY(mid.y + 0.25);
+  return L.shot(pos, mid, 0.6);
 }
 /** a shot of a cast member's face from in front of them (d m away, a little to the side) */
 function face(L: Level3D, c: Cast, k: CastKind, d = 2.4, side = 0.5, up = 0.25): Waiter {
@@ -35,7 +69,7 @@ function face(L: Level3D, c: Cast, k: CastKind, d = 2.4, side = 0.5, up = 0.25):
   const pos = h.clone().addScaledVector(f, d).add(V(-f.z * side, up, f.x * side));
   return L.shot(pos, h, 0.7);
 }
-function stageOn(L: Level3D) { L.cutscene(true); G(L).cast.show(true); }
+function stageOn(L: Level3D) { L.cutscene(true); clearMarks(L); G(L).cast.show(true); }
 function stageOff(L: Level3D) { const g = G(L); g.cast.show(false); g.placeHelpers(g.fight && !g.won); }
 /** put MY hero on my spot of a ring around (x, z), facing the middle (after a scene: everyone stands somewhere sane) */
 function gather(L: Level3D, x: number, z: number, r: number, a0: number) {
@@ -71,7 +105,7 @@ const scripts: Record<string, ScriptFn> = {
       yield L.shot(V(8.5, 4.4, 51.5), V(bed.x, 1.2, bed.z), 0);
       yield L.shot(V(5.5, 3.4, 47), V(bed.x, 1.3, bed.z), 2.2);
       // К2 the can waters a grey flower; the flower shivers and greys even more
-      yield L.shot(V(bed.x + 4.1, 2.2, bed.z + 4.2), V(bed.x + 0.9, 1.3, bed.z + 0.9), 0);
+      yield L.shot(V(hang.x + 1.0, 2.0, hang.z - 2.8), V(bed.x + 0.8, 1.3, bed.z + 0.7), 0);
       can.tilt = 0.8; can.pour = 1;
       const drip = () => ambient(L, () => { L.fx.emit(V(bed.x + 0.9, top + 0.4, bed.z + 0.9), { count: 6, speed: [0.3, 1.2], life: [0.5, 1], size: [0.15, 0.3], size2: 1.6, colors: ['#8a8a96', '#b8b8c4', '#6a6a78'], g: -0.6, drag: 2 }); });
       drip(); g.after(0.8, drip); g.after(1.8, drip); g.after(2.8, drip);
@@ -139,7 +173,7 @@ const scripts: Record<string, ScriptFn> = {
     c.look('noki', null); c.expr('bublik', 'normal');
     // К5 the mirrors on their stands (over Пастила's shoulder, into the court: mirror 1 is there)
     const pp = c.pos('pastila');
-    yield L.shot(V(pp.x + 0.9, 2.1, pp.z + 2.4), V(-6.5, 1.6, 44.5), 0.8);
+    yield L.shot(V(pp.x + 1.3, 1.75, pp.z + 1.9), V(-6.5, 1.1, 44.5), 0.8);
     yield say(L, 'pastila', 'Корень полуденника — под куполом. Он цветёт только в полдень.');
     c.pose('pastila', 'cheer', 'happy');
     yield say(L, 'pastila', 'Значит, сделаем полдень! Зеркала ловят свет. Повернём их на купол!', 'happy');
@@ -187,9 +221,9 @@ const scripts: Record<string, ScriptFn> = {
     try {
       // К1 from above: the four round the bed in the light of a made noon
       g.bud.open = 0.5;
-      yield L.shot(V(C.x + 1.5, 13, C.z + 6.5), V(C.x, 0.5, C.z), 0);
+      yield L.shot(V(C.x + 1.0, 14, C.z + 3.6), V(C.x, 0, C.z + 1.6), 0);
       c.pose('pastila', 'cheer', 'happy');
-      yield all(L.shot(V(C.x + 1.2, 11, C.z + 5.4), V(C.x, 0.5, C.z), 2.4), say(L, 'pastila', 'Полдень! Искусственный, но настоящий. Корень раскрывается!', 'happy'));
+      yield all(L.shot(V(C.x + 0.8, 12.5, C.z + 3.2), V(C.x, 0, C.z + 1.6), 2.4), say(L, 'pastila', 'Полдень! Искусственный, но настоящий. Корень раскрывается!', 'happy'));
       c.pose('pastila', 'idle', 'surprised');
       // К2 the bud
       yield L.shot(V(C.x + 2.2, 1.9, C.z + 2.6), g.bud.top, 0);
@@ -203,13 +237,14 @@ const scripts: Record<string, ScriptFn> = {
       });
       ambient(L, () => { audio.sfx('hiss', { pitch: 1.6, volume: 0.6 }); audio.sfx('reflect', { pitch: 0.6, volume: 0.7 }); });
       // (a wide shot from the bed out toward the mirrors of the north-west wall, the four in front of them)
-      yield L.shot(V(C.x + 3.2, 2.6, C.z + 8.5), V(C.x - 5, 2.0, C.z - 9), 0);
+      // (from the north of the bed toward the south wall's mirrors: the four between us and the glass)
+      yield L.shot(V(C.x - 1.5, 2.5, C.z - 6.5), V(C.x + 1.5, 1.8, C.z + 12), 0);
       c.expr('bublik', 'scared');
       yield say(L, 'bublik', 'Он… за каждым из нас. Сразу.', 'scared');
       // К4 they spin round — nobody behind them
       g.sceneGhosts = null;
       for (const k of CAST) { const p = c.pos(k); c.look(k, V(p.x * 2 - C.x, 1, p.z * 2 - C.z)); c.expr(k, 'scared'); }
-      yield L.shot(V(C.x, 3.6, C.z + 1.0), V(C.x, 0.8, C.z + 5), 0);
+      yield L.shot(V(C.x + 2.6, 1.9, C.z + 9.3), V(C.x + 0.2, 1.0, C.z + 3.5), 0);
       g.whispers.say(V(C.x + 3, 1.6, C.z - 7), '…НЕТ…', 3);
       ambient(L, () => audio.sfx('hiss', { pitch: 0.9 }));
       yield say(L, 'shepot', '…НЕТ… свет… больно… гасите…', 'angry');
@@ -228,7 +263,8 @@ const scripts: Record<string, ScriptFn> = {
       // К6 over Ноки's shoulder onto the empty air over the bed
       const np = c.pos('noki');
       const toBed = V(C.x - np.x, 0, C.z - np.z).normalize();
-      yield L.shot(np.clone().addScaledVector(toBed, -1.6).add(V(-toBed.z * 0.6, 1.9, toBed.x * 0.6)), V(C.x, 1.6, C.z), 0.6);
+      const nh = c.head('noki');
+      yield L.shot(nh.clone().addScaledVector(toBed, -2.0).add(V(-toBed.z * 0.85, 0.5, toBed.x * 0.85)), nh.clone().addScaledVector(toBed, 3.5).setY(0.2), 0.6);
       yield say(L, 'noki', 'Аккорд его проявит. Пастила, держи маяк.');
       // К7 Пастила raises the beacon — her hands shake
       c.expr('pastila', 'scared');
@@ -294,14 +330,14 @@ const scripts: Record<string, ScriptFn> = {
     let mouseG: THREE.Group | null = null;
     try {
       // К1 a low shot, at his height
-      yield L.shot(V(C.x + 0.4, 1.0, C.z + 5.6), seat.clone().setY(1.2), 0);
+      yield L.shot(V(C.x + 0.25, 0.95, C.z + 4.4), seat.clone().setY(1.15), 0);
       yield wait(0.5);
       yield say(L, 'shepot', '…не смотрите… я страшный…', 'scared');
       // К2 Бублик crouches next to him (0.8 m)
-      c.place('bublik', ...placeAt(L, V(C.x + 0.35, 0, C.z + 3.2), 'bublik'), Math.PI + 0.3);
+      c.place('bublik', ...placeAt(L, V(C.x + 0.35, 0, C.z + 3.2), 'bublik', 0.35), Math.PI + 0.3);
       c.look('bublik', seat);
       c.expr('bublik', 'surprised');
-      yield L.shot(V(C.x + 2.3, 1.15, C.z + 4.3), V(C.x + 0.15, 0.95, C.z + 2.75), 0);
+      yield L.shot(V(C.x + 2.5, 1.2, C.z + 2.0), V(C.x + 0.1, 0.9, C.z + 2.8), 0);
       yield say(L, 'bublik', 'Ты маленький. И ушастый. Как я!', 'surprised');
       c.expr('bublik', 'happy');
       b.anim.hide = 0.3;
@@ -313,16 +349,17 @@ const scripts: Record<string, ScriptFn> = {
       c.expr('pastila', 'normal');
       // К4 out of the apron: a folded yellowed page (from here his name in the box is «Шуршик»)
       L.seen.add(NAMED);
+      setStoryFlag(NAMED);
       b.anim.hide = 0;
       b.rig.page.visible = true;
-      yield L.shot(V(C.x - 0.5, 1.15, C.z + 3.9), seat.clone().setY(1.05), 0);
+      yield L.shot(V(C.x - 0.7, 1.25, C.z + 4.7), seat.clone().setY(1.0), 0);
       ambient(L, () => audio.sfx('artifact', { pitch: 0.8, volume: 0.6 }));
       yield say(L, 'shepot', '…она велела отдать… девочке с гитарой… а я стеснялся… сто лет…', 'sad');
       // К5 Ноки and Шуршик
       c.expr('noki', 'surprised');
-      yield c.walk('noki', C.x - 0.9, C.z + 3.5, 2.6, 2.5);
+      yield c.walk('noki', C.x + 1.35, C.z + 3.3, 2.6, 2.5);
       c.look('noki', seat);
-      yield L.shot(V(C.x + 1.9, 1.5, C.z + 5.4), V(C.x - 0.4, 1.0, C.z + 2.9), 0);
+      yield L.shot(V(C.x - 1.3, 1.4, C.z + 5.7), V(C.x + 0.6, 1.0, C.z + 2.9), 0);
       yield say(L, 'noki', 'Мне?', 'surprised');
       b.rig.page.visible = false;
       yield showCard(L, 'page');
@@ -362,7 +399,7 @@ const scripts: Record<string, ScriptFn> = {
     const C = ARENA.c;
     stageOn(L);
     marks(L, c, MARKS.bed);
-    c.place('pastila', ...placeAt(L, V(C.x + 0.5, 0, C.z + 3.0), 'pastila', 0.6), Math.PI);
+    c.place('pastila', ...placeAt(L, V(C.x + 0.5, 0, C.z + 3.0), 'pastila', 0.3), Math.PI);
     for (const k of CAST) c.look(k, V(C.x, 1, C.z));
     g.bud.open = 1;
     audio.playMusic('garden');
@@ -379,7 +416,7 @@ const scripts: Record<string, ScriptFn> = {
       g.bud.open = 0.6; // the made noon fades
       // К2 Пастила and Ноки
       c.look('pastila', c.pos('noki')); c.look('noki', c.pos('pastila'));
-      yield two(L, c, 'pastila', 'noki');
+      yield two(L, c, 'pastila', 'noki', C);
       yield say(L, 'pastila', 'Две колбы. Ноки… ты прочитаешь страницу?');
       yield say(L, 'noki', 'Не сейчас.');
       // К3 the dome's mirrors go dark at once; the music breaks off
@@ -396,9 +433,9 @@ const scripts: Record<string, ScriptFn> = {
       yield say(L, 'polnoch', 'Ноки. Ты привела ко мне внучку Карамели. Спасибо.');
       // К5 from the mirror (over the King's shoulder) onto the four — Ноки starts walking toward him
       c.expr('pastila', 'scared');
-      yield L.shot(V(km.pos.x - 0.8, 3.0, km.pos.z + 0.8), V(C.x, 1.2, C.z + 3), 0);
+      yield L.shot(V(C.x - 0.8, 2.6, C.z - 3.6), V(C.x, 0.9, C.z + 5), 0); // (from the mirror's side of the bed)
       const nokiTo = placeAt(L, V(km.pos.x + 0.3, 0, km.pos.z + 1.6), 'noki', 0.5);
-      const nokiGo = c.walk('noki', nokiTo[0], nokiTo[2], 2.6, 12);
+      const nokiGo = c.route('noki', [[C.x + 4.2, C.z], [nokiTo[0], nokiTo[2]]], 2.6); // (round the bed, not through it)
       yield say(L, 'pastila', 'Он… видит нас?', 'scared');
       yield mirrorShot();
       yield say(L, 'polnoch', 'Зеркала — мои окна. У тебя прабабкин нос, принцесса. Она тоже тряслась.');
@@ -411,7 +448,7 @@ const scripts: Record<string, ScriptFn> = {
       // К7 Ноки swings: ДЗЫНЬ — the mirror flies to pieces
       yield nokiGo;
       c.look('noki', km.pos.clone().setY(2));
-      c.walk('bublik', nokiTo[0] - 1.3, nokiTo[2] + 1.2, 4.5, 8);
+      const bublikGo = c.route('bublik', [[C.x + 4.0, C.z + 1.5], [C.x + 3.4, C.z - 4], [nokiTo[0] + 1.4, nokiTo[2] + 1.0]], 4.5);
       yield L.shot(V(km.pos.x + 3.2, 2.0, km.pos.z + 4.6), V(km.pos.x - 0.2, 1.8, km.pos.z + 0.8), 0);
       c.expr('noki', 'angry');
       c.anim('noki').attack = { kind: 'chord', p: 0.5 };
@@ -424,7 +461,10 @@ const scripts: Record<string, ScriptFn> = {
       // К8 Ноки and Бублик
       c.expr('noki', 'normal'); c.look('bublik', c.pos('noki')); c.look('noki', c.pos('bublik'));
       c.expr('bublik', 'happy');
-      yield two(L, c, 'bublik', 'noki');
+      yield bublikGo;
+      // (from the bed's side: the broken frame behind them)
+      const mid2 = c.head('bublik').lerp(c.head('noki'), 0.5);
+      yield L.shot(mid2.clone().add(V(1.6, 0.35, 3.0)), mid2.clone().setY(mid2.y - 0.2), 0.5);
       yield say(L, 'bublik', 'Уже не всегда.', 'happy');
       yield wait(0.6);
     } finally {
@@ -468,7 +508,9 @@ function setup(L: Level3D) {
   const g = G(L);
   if (!g) return;
   g.cast = new Cast(L);
-  const b = new Shepot3(L, { lanterns: g.arenaLanterns, mirrors: g.arenaMirrors, flowers: g.arenaFlowers, feet: g.feet, whispers: g.whispers });
+  const b = new Shepot3(L, { lanterns: g.arenaLanterns, mirrors: g.arenaMirrors, flowers: g.arenaFlowers, feet: g.feet, whispers: g.whispers, can: g.can, puddles: g.puddles, heard: () => g.heard });
+  // (the cold open was seen but the intro never ran: a crash / quit in between)
+  if (L.seen.has('fangs3_cold') && !L.seen.has('fangs3_intro') && L.authority) g.pending.push('fangs3_intro');
   g.boss = b;
   b.onDefeat = () => { if (L.authority) g.pending.push('fangs3_boss_defeat'); };
   // the kit's reveals and chords reach him too (pollen bursts, Ноки's chord, scripts)

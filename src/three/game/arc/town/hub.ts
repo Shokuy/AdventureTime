@@ -26,6 +26,10 @@ import { DAY } from './palette';
 import * as T from './props';
 import { SHOP_GREET, SHOP_REACT, BOARD, SIGNS, barksOf, barkGroup, PASTILA_TALK, TOASTS, TRAIN, TRAIN_ENTRY, TRAIN_EXIT, TRAIN_COMBOS, TRAIN_OTHER, TRAIN_CLOSED, type BarkWho, type TrainLine } from './lines';
 import { buildCourse, type Course, type Station } from './course';
+import { safeMark } from '../shared/safeMark';
+import { showCard } from '../shared/storyCard';
+import { vamp, markCharacter, setGrey } from '../vampires';
+import { glow } from './kit';
 
 /*
  * The hub level `hub` — Пастильное королевство by day (docs/script-fangs.md §4). Free walk, no enemies:
@@ -44,7 +48,9 @@ import { buildCourse, type Course, type Station } from './course';
 const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 const v3 = (p: V3) => new THREE.Vector3(p.x, p.y, p.z);
 /** save keys of the hub's one-time scenes */
-export const HUB_SEEN = { arrival: 'scene:hub_arrival', shop: 'scene:hub_shop_bear', meet: 'scene:hub_lab_meet', plan: 'scene:hub_lab_plan', mirror: 'scene:hub_mirror' };
+export const HUB_SEEN = { arrival: 'scene:hub_arrival', shop: 'scene:hub_shop_bear', meet: 'scene:hub_lab_meet', card: 'scene:hub_lab_card', plan: 'scene:hub_lab_plan', mirror: 'scene:hub_mirror' };
+/** v2 §8.10: the arc stage of «Серый город» (four series done, before the last night) */
+export const GREY_CITY = 4;
 const ARC_IDS = ['fangs1', 'fangs2', 'fangs3', 'fangs4', 'fangs5'];
 
 /** the progress that decides what the hub shows: mine solo, the room's (the host's map) in co-op */
@@ -133,6 +139,7 @@ export class TownHub {
     installSpeech(L);
     this.extraProps();
     this.placePeople();
+    if (this.stage === GREY_CITY) this.greyCity();
     this.placeSpots();
     this.placeSecrets();
     this.placeSigns();
@@ -158,6 +165,32 @@ export class TownHub {
     // a road post by the gate, a waffle doormat under the arch
     L.add(T.townSignpost({ x: 3.8, y: 0, z: 50.6, rotY: 2, label: 'КАРТА →', pal }));
     L.add(T.waffleMat({ x: 0, y: 0, z: 54, w: 5.2, d: 2.4 }));
+    // v2 4.1: tonight is the Праздник фонариков — a garland of paper lanterns over the gate (both faces)
+    for (const sz of [1, -1]) L.deco(lanternGarland(0, 54 + sz * 1.25, 8.4, 5.7));
+    // v2 4.3 / closure Д: Пастила's folding cot by the west wall and her sun-nightlight on a stool beside it
+    const lc = this.lay.lab.center;
+    this.nightlight = labCot(L, lc.x, lc.z);
+  }
+  /** the princess's nightlight (closure Д): where it stands (for the close-up in 4.4б) */
+  nightlight = new THREE.Vector3();
+
+  /** v2 §8.10 «Серый город»: the whole town grey (grey zones over everything but the lab, its yard and the course),
+   *  every townsperson and Вторник grey; the lab's windows glow pink — the nightlight burned all night */
+  private greyCity() {
+    const L = this.L, K = vamp(L);
+    const zones: [string, number, number, number][] = [['hub_south', 0, 30, 26], ['hub_square', 0, 2, 20], ['hub_west', -32, -6, 22], ['hub_east', 32, -6, 22], ['hub_nw', -30, -42, 18], ['hub_palace', 0, -62, 10], ['hub_ne', 46, -40, 12]];
+    for (const [id, x, z, r] of zones) K.greyZone(id, [x, 0, z], r, { edge: 4, auto: 'none' });
+    for (const f of this.folk) {
+      if (f.id === 'iriska') { markCharacter(f.g, L.scene); continue; }
+      f.grey = 1; f.anim.grey = 1;
+      if (f.who !== 'pryanik') f.speaker = 'presnyak';
+    }
+    if (this.bear) { markCharacter(this.bear.root, L.scene); setGrey(this.bear.root, 1); }
+    // the lab's porthole windows, lit from inside
+    const lc = this.lay.lab.center;
+    for (const a of [Math.PI / 2, Math.PI * 0.85, -Math.PI * 0.85, -Math.PI / 2, -Math.PI * 0.42, Math.PI * 0.42]) {
+      const g = glow('#ffb0d0', 2.6, 0.75); g.position.set(lc.x + Math.sin(a) * 6.3, 2.7, lc.z + Math.cos(a) * 6.3); L.deco(g);
+    }
   }
 
   private folkAt(id: string, who: BarkWho, kind: FolkKind, look: FolkLook, at: V3, yaw: number, o: { mode?: Folk['mode']; path?: V3[]; speed?: number; phase?: number; grey?: number; speaker?: SpeakerId; name?: string; collide?: boolean } = {}): Folk {
@@ -191,6 +224,7 @@ export class TownHub {
     g.position.copy(at); g.rotation.y = yaw;
     this.L.scene.add(g);
     const speaker: SpeakerId = kind === 'tosha' ? 'tosha' : kind === 'bublik' ? 'bublik' : kind;
+    if (this.stage === GREY_CITY) markCharacter(g, this.L.scene);
     const f: Figure = { kind, rig, g, anim: heroAnim(), speaker, walk: null, face: null };
     this.figures.set(key, f);
     return f;
@@ -263,6 +297,8 @@ export class TownHub {
   private toastT = 0;
   private courseToastT = 0;
   private comboI = 0;
+  /** the King's invitation card between 4.3 and 4.4а (a scene prop) */
+  invite: THREE.Group | null = null;
   /** where Ноки can be talked to (after the meeting) */
   nokiSpot = new THREE.Vector3(0, -100, 0);
 
@@ -878,8 +914,8 @@ function* hubArrival(L: Level3D): Script {
   if (!hub) return;
   save.collect(HUB_SEEN.arrival);
   L.cutscene(true);
-  const tosha = hub.figure('tosha', 'tosha', V(-0.7, 0, 62.5), Math.PI);
-  const bublik = hub.figure('bublik', 'bublik', V(0.9, 0, 63.2), Math.PI);
+  const tosha = hub.figure('tosha', 'tosha', V(-0.7, 0, 60.9), Math.PI); // (inside the invisible sides outside the gate: z < 61.5)
+  const bublik = hub.figure('bublik', 'bublik', V(0.9, 0, 61.2), Math.PI);
   const pry = hub.folk.find((f) => f.id === 'pryanik');
   // the road, the gate, the towers behind
   yield L.shot(V(0, 3.4, 76), V(0, 6, 40), 0);
@@ -890,16 +926,16 @@ function* hubArrival(L: Level3D): Script {
   yield say(L, 'pryanik', 'Стой! Кто идёт? Пароль!', 'angry');
   tosha.face = Math.PI;
   yield say(L, 'tosha', 'Э-э… Здравствуйте?', 'surprised');
-  yield say(L, 'pryanik', 'Неверно. Пароль — «пожалуйста». Ну да ладно, вежливых пускаем и так. Проходите!');
+  yield say(L, 'pryanik', 'Неверно. Пароль — «пожалуйста». Ну да ладно, вежливых пускаем и так.');
   // (he steps aside, still in the picture with the two — at his post by the wall he talked from behind the camera)
   if (pry) { pry.g.position.set(-2.3, 0, 53.3); pry.g.rotation.y = 1.25; pry.homeYaw = 1.25; }
   yield all(L.shot(V(0.9, 2.0, 50.3), V(-0.6, 1.0, 54.4), 1.0), walkFig(tosha, -0.6, 54.4, 2.0), walkFig(bublik, 0.9, 54.8, 2.0));
   bublik.anim.expr = 'happy';
   yield say(L, 'bublik', 'Тоша, тут пахнет пастилой, пряниками и зефиром. Я что, в раю?', 'happy');
-  yield say(L, 'pryanik', 'Вы в Пастильном королевстве. Рай — это дальше, в пекарне у Мадам Безе.');
+  yield say(L, 'pryanik', 'В Пастильном королевстве. А сегодня ещё и Праздник фонариков!');
   yield say(L, 'tosha', 'Нам нужна принцесса Пастила! Утром над скалой вспыхнула красная луна!');
-  yield say(L, 'pryanik', 'Тс-с! Не кричите про луну — жителей перепугаете.', 'scared');
-  yield say(L, 'pryanik', 'Принцесса в лаборатории, в розовой башне. Стучите погромче: она там что-то взрывает.');
+  yield say(L, 'pryanik', 'Тс-с! Про луну — шёпотом. Принцесса и так всех пугает графиками.', 'scared');
+  yield say(L, 'pryanik', 'Она в розовой башне. Стучите громче: она там что-то взрывает.');
   // a distant «БУМ!» and a pink cloud over the pink tower: behind the two, through the gate
   tosha.face = Math.PI; bublik.face = Math.PI;
   yield L.shot(V(1.3, 1.9, 58.8), V(0, 4.6, 26), 1.0);
@@ -964,7 +1000,7 @@ function* mirrorScene(hub: TownHub): Script {
   hub.frame(front.clone().addScaledVector(out, 5.2).addScaledVector(side, 0.6).setY(2.4), m.clone().setY(1.8));
   try {
     yield say(L, 'pastila', 'Зеркало героев. Посмотрите — и побудьте Тошей, Бубликом, Ноки или мной.');
-    yield say(L, 'noki', 'Я в него не смотрю. Оно мне ничего не показывает.');
+    yield say(L, 'noki', 'Я в него не смотрю. Сто лет оно мне ничего не показывает.');
     yield say(L, 'bublik', 'А если все захотят быть мной?');
     yield say(L, 'pastila', 'Зеркало не жадное. Хоть шесть Бубликов.');
     fb.anim.expr = 'happy';
@@ -984,6 +1020,9 @@ function* labMeet(L: Level3D): Script {
   const c = v3(hub.lay.lab.center);
   const at = (x: number, z: number, y = 0) => V(c.x + x, y, c.z + z);
   L.cutscene(true);
+  // marks (v2 4.3): from lab.center, through safeMark (no one inside the furniture)
+  const tM = safeMark(L, at(-0.6, 2.8), { wall: 0.7, label: '4.3 tosha' }), bM = safeMark(L, at(0.8, 3.0), { wall: 0.7, label: '4.3 bublik' });
+  const noM = safeMark(L, at(2.7, 0.9), { wall: 0.7, label: '4.3 noki' });
   const tosha = hub.figure('tosha', 'tosha', at(-0.7, 6.2), Math.PI);
   const bublik = hub.figure('bublik', 'bublik', at(0.8, 6.4), Math.PI);
   const ld = hub.ladderSpot();
@@ -993,9 +1032,9 @@ function* labMeet(L: Level3D): Script {
   if (iri) { iri.g.position.copy(at(1.5, -3.0)); iri.homeYaw = -0.3; iri.g.rotation.y = -0.3; }
   // from the door: the princess on her stepladder, back to us, writing
   yield L.shot(at(0.4, 8.0, 2.0), at(-1.8, -2.0, 1.9), 0);
-  yield all(walkFig(tosha, c.x - 0.6, c.z + 2.8, 2.0), walkFig(bublik, c.x + 0.8, c.z + 3.0, 2.0), L.shot(at(0.6, 5.6, 1.9), at(-1.9, -1.8, 1.9), 1.6));
+  yield all(walkFig(tosha, tM.x, tM.z, 2.0), walkFig(bublik, bM.x, bM.z, 2.0), L.shot(at(0.6, 5.6, 1.9), at(-1.9, -1.8, 1.9), 1.6));
   yield say(L, 'tosha', 'Принцесса Пастила? Здравствуйте! Мы видели красную луну!', 'happy');
-  yield say(L, 'pastila', 'Алую. Сегодня в 6:42 утра, над Чёрным перевалом. Ровно ноль целых восемь десятых секунды.');
+  yield say(L, 'pastila', 'Алую. В 6:42 утра, над Чёрным перевалом. Ноль целых восемь десятых секунды.');
   // she turns around
   pas.face = 0.4;
   yield L.shot(at(-0.4, 1.4, 1.8), at(-2.4, -2.0, 1.9), 0.8);
@@ -1004,14 +1043,19 @@ function* labMeet(L: Level3D): Script {
   pas.g.position.copy(at(-1.6, -0.9)); pas.face = 0.3; L.fx.dust(pas.g.position.clone(), 8);
   yield L.shot(at(1.6, 3.6, 1.7), at(-0.8, 0.8, 1.1), 0.8);
   yield say(L, 'tosha', 'Я Тоша, это Бублик. Мы утром выбрались из Ямы Громадин!');
-  yield say(L, 'pastila', 'Из Ямы Громадин? Оттуда никто не выбирается. Потрясающе. Можно я вас потом измерю?', 'surprised');
+  yield say(L, 'pastila', 'Оттуда никто не выбирается. Потрясающе. Можно я вас потом измерю?', 'surprised');
   yield say(L, 'bublik', 'Можно. Только не щекотно.');
-  // a bat through the right window, fluttering over the flasks
+  // К4: a bat through the right window, a black card in its paws, fluttering over the flasks
   const win = at(5.5, 0.2, 2.7);
   const bat = makeBat();
   bat.scale.setScalar(1.8);
   bat.position.copy(win);
+  const card = inviteCard();
+  card.scale.setScalar(1 / 1.8);
+  card.position.set(0, -0.2, 0.08); card.rotation.set(-0.5, 0, 0);
+  bat.add(card);
   L.scene.add(bat);
+  audio.stopMusic(0.6);
   audio.sfx('break', { pitch: 1.6, volume: 0.6 });
   L.fx.sparks(win.clone(), 16, ['#e8f8ff', '#ffffff', '#bfe6ff']);
   let bt = 0;
@@ -1027,8 +1071,8 @@ function* labMeet(L: Level3D): Script {
   yield all(L.shot(at(-1.4, 2.4, 2.2), at(1.2, -2.6, 2.1), 0.6), flyFor(0.9));
   pas.anim.expr = 'scared';
   yield all(say(L, 'pastila', 'Летучая мышь! Не дайте ей сесть на пастилу — выпьет весь вкус!', 'scared'), flyFor(0.1));
-  // Ноки in through the window — one swing: ДЗЫНЬ!
-  const land = at(2.7, 0.9);
+  // К5: Ноки in through the window — one swing: ДЗЫНЬ!
+  const land = noM;
   const noki = hub.figure('noki', 'noki', win.clone().setY(2.2), -Math.PI / 2);
   noki.face = null;
   L.fx.sparks(win.clone(), 20, ['#e8f8ff', '#ffffff', '#c8304a']);
@@ -1037,7 +1081,7 @@ function* labMeet(L: Level3D): Script {
   const jump: Waiter = { update: (dt) => {
     nt += dt; flyTo(dt, land.clone().add(V(-1.0, 1.7, -0.6)));
     const k = Math.min(1, nt / 0.7);
-    noki.g.position.set(win.x + (land.x - win.x) * k, 2.2 * (1 - k) + Math.sin(k * Math.PI) * 1.2, win.z + (land.z - win.z) * k);
+    noki.g.position.set(win.x + (land.x - win.x) * k, land.y + (2.2 - land.y) * (1 - k) + Math.sin(k * Math.PI) * 1.2, win.z + (land.z - win.z) * k);
     noki.anim.state = k < 1 ? 'jump' : 'idle';
     noki.g.rotation.y = Math.atan2(land.x - 1.0 - noki.g.position.x, land.z - 0.6 - noki.g.position.z);
     return k >= 1;
@@ -1050,62 +1094,194 @@ function* labMeet(L: Level3D): Script {
   L.fx.chunks(bat.position.clone(), 14, ['#9a96a2', '#c8c4cc', '#6a6672']);
   L.fx.ring(bat.position.clone(), 1.6, '#c8c4cc', 0.4, false);
   audio.sfx('clang', { pitch: 1.4 });
+  // the card is left in the air (it falls in К6)
+  const cardAt = card.getWorldPosition(new THREE.Vector3());
+  bat.remove(card); card.scale.setScalar(1); card.position.copy(cardAt); L.scene.add(card);
   L.scene.remove(bat);
+  hub.invite = card;
   pas.anim.expr = 'normal';
   for (const f of [tosha, bublik, pas]) f.face = Math.atan2(noki.g.position.x - f.g.position.x, noki.g.position.z - f.g.position.z);
   noki.face = Math.atan2(pas.g.position.x - noki.g.position.x, pas.g.position.z - noki.g.position.z);
-  yield L.shot(at(-0.5, 3.6, 1.8), at(2.6, 0.6, 1.3), 0.6);
+  // (the card hangs, turning slowly, while they talk)
+  let ct = 0;
+  const hang: Waiter = { update: (dt) => { ct += dt; card.rotation.y += dt * 1.6; card.position.y = Math.max(1.6, cardAt.y - ct * 0.08); return true; } };
+  yield all(L.shot(at(-0.5, 3.6, 1.8), at(2.6, 0.6, 1.3), 0.6), hang);
   yield say(L, 'noki', 'Двери — для тех, кого ждут. Привет, Пастила.', 'sly');
-  yield L.shot(at(0.6, 4.4, 2.0), at(0.4, -0.2, 1.1), 0.6);
+  yield L.shot(at(0.9, 2.6, 2.4), pas.g.position.clone().setY(1.25), 0.6);
   yield say(L, 'pastila', 'Ноки! Третье окно за месяц!', 'angry');
-  yield say(L, 'noki', 'Это был разведчик Короля Полночь. Где разведчик — там к ночи будет вся стая.');
-  yield L.shot(at(1.2, 5.6, 1.7), at(-0.2, 2.2, 1.0), 0.6);
-  yield say(L, 'tosha', 'Какого короля? Ещё одного?!', 'surprised');
-  yield say(L, 'noki', 'Того самого. Алая луна взойдёт сегодня ночью. Он проснулся.');
-  yield say(L, 'bublik', 'Мне уже не нравится этот король. А я его даже не видел.', 'scared');
-  yield L.shot(at(0.6, 4.4, 2.0), at(0.4, -0.2, 1.1), 0.6);
-  yield say(L, 'pastila', 'Мой Солнечный сироп не готов. Есть только пробная банка. Нам нужна помощь.');
-  // 4.4 follows right away (its own scene, so each fits the co-op watchdog)
+  // К6: the card spins down into Тоша's hands
+  for (const f of [pas, noki, bublik]) f.face = Math.atan2(tosha.g.position.x - f.g.position.x, tosha.g.position.z - f.g.position.z);
+  tosha.face = Math.atan2(card.position.x - tosha.g.position.x, card.position.z - tosha.g.position.z);
+  const hands = handsOf(tosha);
+  const c0 = card.position.clone();
+  // (a close shot from in front of Тоша: the card spinning down into his hands)
+  const ty = tosha.g.rotation.y;
+  const front = hands.clone().add(V(Math.sin(ty) * 1.5 + Math.cos(ty) * 0.6, 0.45, Math.cos(ty) * 1.5 - Math.sin(ty) * 0.6));
+  yield all(
+    L.shot(front, hands.clone().lerp(c0, 0.35), 0.6),
+    tween(1.5, (k) => { card.position.lerpVectors(c0, hands, k); card.position.x += Math.sin(k * Math.PI * 3) * 0.35 * (1 - k); card.rotation.set(-Math.PI / 2 * k + Math.sin(k * 9) * 0.4 * (1 - k), k * 6, 0); }, ease.outQuad),
+  );
+  tosha.face = Math.atan2(noki.g.position.x - tosha.g.position.x, noki.g.position.z - tosha.g.position.z);
+  card.rotation.set(-1.2, tosha.g.rotation.y, 0);
+  // Ноки warns him (she's in the frame, Тоша with the card in the foreground, side-on)
+  yield L.shot(tosha.g.position.clone().add(V(-1.6, 1.55, 1.2)), noki.g.position.clone().lerp(tosha.g.position, 0.45).setY(1.15), 0.5);
+  yield say(L, 'noki', 'Это гонец Короля. Тоша, не открывай.');
+  // К7: Тоша has already opened it — a cold silver glow
+  tosha.face = Math.atan2(hands.x - tosha.g.position.x, hands.z - tosha.g.position.z) ;
+  cardGlow(card, true);
+  audio.sfx('artifact', { pitch: 0.6, volume: 0.5 });
+  yield L.shot(bublik.g.position.clone().add(V(-0.6, 1.4, 2.1)), V((tosha.g.position.x + bublik.g.position.x) / 2, 1.0, (tosha.g.position.z + bublik.g.position.z) / 2), 0.5);
+  bublik.anim.expr = 'scared';
+  yield say(L, 'bublik', 'Он уже открыл.', 'scared');
+  bublik.anim.expr = 'normal';
+  // 4.4а follows right away (its own scene, so each fits the co-op watchdog)
+  if (L.authority) L.runGen((function* (): Script { yield wait(0.05); L.run('hub_lab_card'); })());
+  yield wait(0.1);
+}
+
+/** where a figure holds something in front of it (hands) */
+function handsOf(f: Figure) {
+  const y = f.g.rotation.y;
+  return f.g.position.clone().add(V(Math.sin(y) * 0.42, f.kind === 'bublik' ? 0.6 : 1.05, Math.cos(y) * 0.42));
+}
+
+/** the marks of 4.4а / 4.4б: everyone round the table-model (0.8 m off its edge), Ноки on the east side by the window */
+function tableMarks(hub: TownHub) {
+  const L = hub.L, c = v3(hub.lay.lab.center);
+  const tb = V(c.x - 0.6, 0, c.z + 0.9), R = 1.35 + 0.8;
+  const o = { wall: 0.7 };
+  return {
+    table: tb,
+    tosha: safeMark(L, V(tb.x - 0.35, 0, tb.z + R), { ...o, label: '4.4 tosha' }),
+    bublik: safeMark(L, V(tb.x + Math.sin(0.7) * R, 0, tb.z + Math.cos(0.7) * R), { ...o, label: '4.4 bublik' }),
+    pastila: safeMark(L, V(tb.x - R, 0, tb.z), { ...o, label: '4.4 pastila' }),
+    noki: safeMark(L, V(tb.x + R + 0.4, 0, tb.z - 0.2), { ...o, label: '4.4 noki' }),
+  };
+}
+const yawTo = (from: THREE.Vector3, to: THREE.Vector3) => Math.atan2(to.x - from.x, to.z - from.z);
+
+/** 4.4а hub_lab_card — the invitation (world scene): the card opens by itself and speaks in a cold voice */
+function* labCard(L: Level3D): Script {
+  const hub = hubOf(L);
+  if (!hub) return;
+  save.collect(HUB_SEEN.card);
+  L.cutscene(true);
+  const m = tableMarks(hub);
+  const tb = m.table;
+  const tosha = hub.figure('tosha', 'tosha', m.tosha, yawTo(m.tosha, tb));
+  const bublik = hub.figure('bublik', 'bublik', m.bublik, yawTo(m.bublik, tb));
+  const pas = hub.figure('pastila', 'pastila', m.pastila, yawTo(m.pastila, tb));
+  const noki = hub.figure('noki', 'noki', m.noki, yawTo(m.noki, tb));
+  for (const f of [tosha, bublik, pas, noki]) { f.walk = null; f.face = f.g.rotation.y; }
+  let card = hub.invite;
+  if (!card) { card = inviteCard(); L.scene.add(card); hub.invite = card; }
+  cardGlow(card, true);
+  const hands = handsOf(tosha);
+  card.position.copy(hands); card.rotation.set(-1.0, tosha.g.rotation.y, 0);
+  audio.stopMusic(0.6);
+  try {
+    // К1: the card in Тоша's hands, through his eyes
+    const eye = tosha.g.position.clone().add(V(-Math.sin(tosha.g.rotation.y) * 0.25 + 0.2, 1.35, -Math.cos(tosha.g.rotation.y) * 0.25));
+    yield L.shot(eye, hands, 0);
+    showCard(L, 'Приглашение', 'Чёрная карточка с серебряным полумесяцем. «Блюдо — вы». На обороте что-то есть, но не видно.', { icon: 'invite', secs: 2.8 });
+    yield wait(0.6);
+    audio.sfx('hiss', { volume: 0.3, pitch: 0.7 });
+    yield say(L, 'polnoch', '«Пастильному королевству. Его Величество Король Полночь приглашает вас на ужин.»');
+    yield say(L, 'polnoch', '«Начало — в полночь. Пять ночей подряд. Блюдо — вы.»');
+    yield say(L, 'polnoch', '«Наряд — серый. Отказ не принимается. Ваш Король.»');
+    // К2: from above — the four round the table-model, the card hovering over its middle
+    const c0 = card.position.clone(), mid = tb.clone().setY(1.55);
+    yield all(L.shot(tb.clone().add(V(0.2, 5.6, 4.2)), tb.clone().add(V(0, 0.6, 1.1)), 0.8), tween(0.8, (k) => { card!.position.lerpVectors(c0, mid, k); card!.rotation.set(-Math.PI / 2 + 0.2, k * 3, 0); }, ease.inOut));
+    for (const f of [tosha, bublik, pas, noki]) f.face = yawTo(f.g.position, tb);
+    const spin = { update: (dt: number) => { card!.rotation.z += dt * 0.6; return true; } };
+    bublik.anim.expr = 'scared';
+    yield all(say(L, 'bublik', 'Нас пригласили на ужин. Почему мне не хочется идти?', 'scared'), spin);
+    bublik.anim.expr = 'normal';
+    yield say(L, 'pastila', 'Потому что мы — меню.');
+    // К3: Ноки by the window (the moon behind her, still white)
+    const np = noki.g.position;
+    yield L.shot(V(np.x - 2.4, 1.6, np.z + 0.9), np.clone().setY(1.25), 0.6);
+    yield say(L, 'noki', 'Алая луна взойдёт сегодня. Он проснулся. Он всегда сначала пишет.');
+    tosha.face = yawTo(tosha.g.position, np);
+    yield say(L, 'tosha', 'Ты его знаешь?', 'surprised');
+    yield say(L, 'noki', 'Встречались. Сто лет назад.');
+    // К4: Ноки and Пастила (over Ноки's shoulder)
+    pas.face = yawTo(pas.g.position, np); noki.face = yawTo(np, pas.g.position);
+    // (from behind the table, between it and the bench: Пастила on the left, Ноки on the right, both facing in)
+    yield L.shot(V(tb.x + 0.2, 2.9, tb.z - 3.3), V(tb.x + 0.3, 0.9, tb.z + 0.6), 0.6);
+    yield say(L, 'pastila', 'Мой Солнечный сироп не готов. Есть одна пробная банка. И всё.');
+    // К5: the four
+    yield L.shot(V(tb.x + 0.6, 3.7, tb.z + 3.9), tb.clone().add(V(0, 0.5, 1.3)), 0.7);
+    tosha.anim.expr = 'happy';
+    yield say(L, 'tosha', 'Мы поможем! Правда, Бублик?', 'happy');
+    tosha.anim.expr = 'normal';
+    yield say(L, 'bublik', 'Правда. Если потом будет пирог.');
+    yield say(L, 'noki', 'Твоя прапрабабушка тоже вечно звала на помощь первых встречных.', 'sly');
+    pas.anim.expr = 'surprised';
+    yield say(L, 'pastila', 'Ты знала прапрабабушку Карамель?!', 'surprised');
+    pas.anim.expr = 'normal';
+    audio.sfx('hiss', { volume: 0.2, pitch: 0.5 });
+  } finally {
+    if (card) { card.removeFromParent(); hub.invite = null; }
+  }
+  // 4.4б follows right away
   if (L.authority) L.runGen((function* (): Script { yield wait(0.05); L.run('hub_lab_plan'); })());
   yield wait(0.1);
 }
 
-/** 4.4 hub_lab_plan — the model of Хрумляндия, the mirror, the plan for the night (world scene); opens series 2 */
+/** 4.4б hub_lab_plan — the model of Хрумляндия, the nightlight, the plan (world scene); opens series 2 */
 function* labPlan(L: Level3D): Script {
   const hub = hubOf(L);
   if (!hub) return;
   const c = v3(hub.lay.lab.center);
-  const at = (x: number, z: number, y = 0) => V(c.x + x, y, c.z + z);
   L.cutscene(true);
-  const tosha = hub.figure('tosha', 'tosha', at(-0.6, 2.8), Math.PI);
-  const bublik = hub.figure('bublik', 'bublik', at(0.8, 3.0), Math.PI);
-  const pas = hub.figure('pastila', 'pastila', at(-1.6, -0.9), 0.3);
-  const noki = hub.figure('noki', 'noki', at(2.7, 0.9), -1.9);
+  const m = tableMarks(hub);
+  const tb = m.table;
+  const tosha = hub.figure('tosha', 'tosha', m.tosha, yawTo(m.tosha, tb));
+  const bublik = hub.figure('bublik', 'bublik', m.bublik, yawTo(m.bublik, tb));
+  const pas = hub.figure('pastila', 'pastila', m.pastila, yawTo(m.pastila, tb));
+  const noki = hub.figure('noki', 'noki', m.noki, yawTo(m.noki, tb));
+  for (const f of [tosha, bublik, pas, noki]) { f.walk = null; f.face = yawTo(f.g.position, tb); }
   const iri = hub.folk.find((f) => f.id === 'iriska');
-  if (iri) { iri.g.position.copy(at(1.5, -3.0)); iri.homeYaw = -0.3; }
-  const table = at(-0.6, 0.9);
-  // everyone at the table-model
-  yield all(walkFig(tosha, table.x - 1.2, table.z + 1.7, 2.2), walkFig(bublik, table.x + 0.6, table.z + 1.8, 2.2), walkFig(pas, table.x - 1.8, table.z - 0.6, 2.2), walkFig(noki, table.x + 1.8, table.z - 0.5, 2.2),
-    L.shot(at(0.8, 5.6, 2.6), V(table.x, 1.0, table.z), 1.0));
-  for (const f of [tosha, bublik, pas, noki]) f.face = Math.atan2(table.x - f.g.position.x, table.z - f.g.position.z);
-  yield say(L, 'tosha', 'Мы поможем! Правда, Бублик?', 'happy');
-  yield say(L, 'bublik', 'Правда. Если потом будет пирог.');
-  yield L.shot(V(table.x + 0.3, 4.4, table.z + 1.6), V(table.x, 0.9, table.z - 0.1), 1.0);
-  yield say(L, 'pastila', 'Будет. Смотрите: это вся Хрумляндия. Я склеила её сама.', 'happy');
-  yield say(L, 'pastila', 'Где побывали — там краски. Где нет — туман. Ходите — макет сам дорисуется.');
-  yield say(L, 'pastila', 'А это вам — карманная копия. Не мните. И флажки не отклеивайте.');
-  yield L.shot(V(table.x - 2.2, 2.0, table.z + 2.8), V(table.x + 1.6, 1.3, table.z - 0.5), 0.8);
-  yield say(L, 'noki', 'Видите чёрный замок на скале? Замок Полночь. Туда не суйтесь. Пока.');
-  yield say(L, 'pastila', 'На площади стоит моё Зеркало героев. Глянете в него — и на время станете одним из нас.');
-  yield L.shot(V(table.x + 1.8, 1.7, table.z + 3.4), V(table.x - 0.2, 1.0, table.z + 1.4), 0.7);
-  yield say(L, 'bublik', 'Я уже глянул, пока шли. Полчаса был принцессой. Хвост остался.', 'happy');
+  audio.playMusic(hubMusic());
+  // К1: from above, the model (fog, the candy kingdom, the pit's flag)
+  yield L.shot(tb.clone().add(V(0.3, 3.4, 1.3)), tb.clone().setY(0.95), 0);
+  yield say(L, 'noki', 'Потом. Сначала — ночь.');
+  yield say(L, 'pastila', 'Смотрите: это вся Хрумляндия. Склеила сама. Где побывали — краски, где нет — туман.');
+  yield say(L, 'pastila', 'Вам — карманная копия. Не мните. Флажки не отклеивайте.');
+  yield say(L, 'noki', 'Чёрный замок на скале — Замок Полночь. Туда не суйтесь. Пока.');
+  // К2: Пастила (Бублик answers in his own shot)
+  const pp = pas.g.position;
+  yield L.shot(V(pp.x + 2.1, 1.5, pp.z + 1.4), pp.clone().setY(1.15), 0.6);
+  yield say(L, 'pastila', 'На площади — моё Зеркало героев. Глянете — и станете одним из нас. Ненадолго.');
+  const bp = bublik.g.position;
+  yield L.shot(V(bp.x + 0.4, 1.2, bp.z + 1.9), bp.clone().setY(0.6), 0.5);
+  bublik.anim.expr = 'happy';
+  yield say(L, 'bublik', 'Я уже глянул. Полчаса был принцессой. Хвост остался.', 'happy');
+  bublik.anim.expr = 'normal';
+  yield L.shot(V(pp.x + 2.1, 1.5, pp.z + 1.4), pp.clone().setY(1.15), 0.4);
   yield say(L, 'pastila', 'Побочный эффект. Научно доказано: проходит.', 'sly');
-  yield L.shot(V(table.x - 2.2, 2.0, table.z + 2.8), V(table.x + 1.6, 1.3, table.z - 0.5), 0.6);
-  yield say(L, 'noki', 'До темноты пара часов. Готовьтесь: лавка, тренировка, что там у вас ещё.');
-  yield say(L, 'pastila', 'Как стемнеет — все на площадь, к часовой башне. Ириска покажет полосу препятствий.');
-  if (iri) { yield L.shot(at(-0.6, -1.0, 1.7), iri.g.position.clone().setY(0.9), 0.6); iri.waveT = 1.6; }
-  yield say(L, 'iriska', 'Полоса препятствий имени меня! Почти не взрывается!', 'happy');
-  // the four part: Тоша and Бублик are the players again; the princess stays, Ноки waits in the shade by the window
+  // К3: close on the nightlight by the cot
+  const nl = hub.nightlight;
+  noki.face = yawTo(noki.g.position, nl);
+  yield L.shot(nl.clone().add(V(1.1, 0.55, 0.8)), nl.clone().add(V(0, 0.1, 0)), 0.6);
+  yield say(L, 'noki', 'А это что? Принцесса до сих пор спит с ночником?', 'sly');
+  // К4: Пастила and Ноки
+  pas.face = yawTo(pp, noki.g.position);
+  pas.anim.expr = 'angry';
+  yield L.shot(V(tb.x + 0.2, 1.9, tb.z + 3.4), tb.clone().setY(1.15), 0.6);
+  yield say(L, 'pastila', 'Это прототип маяка-солнышка! Он просто… горит всю ночь. Для науки.', 'angry');
+  pas.anim.expr = 'normal';
+  yield say(L, 'pastila', 'Как стемнеет — все на площадь. Праздник не отменить: жители не верят в луну.');
+  // К5: Ириска in the doorway
+  const door = V(c.x + 0.4, 0, c.z + 4.0);
+  if (iri) { iri.g.position.copy(door); iri.homeYaw = Math.PI; iri.g.rotation.y = Math.PI; iri.waveT = 1.6; }
+  for (const f of [tosha, bublik, pas, noki]) f.face = yawTo(f.g.position, door);
+  yield L.shot(V(c.x - 0.6, 1.6, c.z + 1.0), door.clone().setY(0.9), 0.6);
+  yield say(L, 'iriska', 'А пока — полоса препятствий имени меня! Почти не взрывается!', 'happy');
+  showCard(L, 'Карманная карта', 'Копия макета Пастилы. Дорисовывается сама. Не мять!', { icon: 'map', secs: 3.4 });
+  yield wait(1.2);
+  // the four part: Тоша and Бублик are the players again; the princess stays, Ноки waits in the shade by the door
   setStoryFlag(LAB_FLAG);
   hub.dropFigure('tosha'); hub.dropFigure('bublik');
   hub.afterMeeting();
@@ -1115,6 +1291,73 @@ function* labPlan(L: Level3D): Script {
   yield wait(0.1);
   L.hud.toast('Готовы к ночи? К часовой башне или в карту — начнётся Серия 2', 6);
   save.write();
+}
+
+// ───────────────────────── props of the v2 scenes ─────────────────────────
+
+/** the King's invitation: a black card with a silver crescent (both faces) */
+function inviteCard(): THREE.Group {
+  const g = new THREE.Group(); g.name = 'invite';
+  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 88;
+  const x = cv.getContext('2d')!;
+  x.fillStyle = '#16101e'; x.fillRect(0, 0, 128, 88);
+  x.strokeStyle = '#c8c8e0'; x.lineWidth = 3; x.strokeRect(7, 7, 114, 74);
+  x.fillStyle = '#eeeeff'; x.beginPath(); x.arc(64, 44, 22, Math.PI * 0.55, Math.PI * 1.95); x.arc(72, 38, 18, Math.PI * 1.95, Math.PI * 0.55, true); x.fill();
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide, color: '#ffffff' });
+  const p = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.24), m); g.add(p);
+  const halo = glow('#d8e0ff', 0.9, 0); halo.name = 'halo'; g.add(halo);
+  return g;
+}
+function cardGlow(card: THREE.Group, on: boolean) {
+  const h = card.getObjectByName('halo') as THREE.Sprite | undefined;
+  if (h) { h.material = h.material.clone(); h.material.opacity = on ? 0.8 : 0; }
+}
+
+/** a sagging string of paper lanterns across the gate (Праздник фонариков) */
+function lanternGarland(x: number, z: number, span: number, y: number): THREE.Group {
+  const g = new THREE.Group();
+  const pts: THREE.Vector3[] = [];
+  for (let i = 0; i <= 16; i++) { const u = i / 16; pts.push(V(x - span / 2 + span * u, y - Math.sin(u * Math.PI) * 1.0, z)); }
+  const rope = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 32, 0.03, 5), new THREE.MeshToonMaterial({ color: '#7a4a2a' }));
+  g.add(rope);
+  const cols = ['#ff7aa8', '#ffd34a', '#7ad8ff', '#9ae06a', '#ff9a4a', '#c88aff'];
+  for (let i = 1; i < 16; i += 2) {
+    const p = pts[i];
+    const c = cols[(i >> 1) % cols.length];
+    const l = new THREE.Mesh(new THREE.SphereGeometry(0.24, 12, 8), new THREE.MeshToonMaterial({ color: c, emissive: c, emissiveIntensity: 0.35 }));
+    l.scale.set(1, 1.25, 1); l.position.set(p.x, p.y - 0.36, p.z); g.add(l);
+    for (const dy of [0.3, -0.3]) { const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.06, 8), new THREE.MeshToonMaterial({ color: '#5a3a2a' })); cap.position.set(p.x, p.y - 0.36 + dy, p.z); g.add(cap); }
+    const gl = glow(c, 0.9, 0.35); gl.position.set(p.x, p.y - 0.36, p.z); g.add(gl);
+  }
+  return g;
+}
+
+/** Пастила's folding cot by the lab's west wall and the sun-nightlight on a stool by it (closure Д); returns its spot */
+function labCot(L: Level3D, cx: number, cz: number): THREE.Vector3 {
+  const g = new THREE.Group();
+  const wood = new THREE.MeshToonMaterial({ color: '#c8803e' });
+  const cloth = new THREE.MeshToonMaterial({ color: '#bfe6ff' });
+  const cot = new THREE.Group();
+  const bed = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.12, 1.9), cloth); bed.position.y = 0.48; cot.add(bed);
+  const pillow = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.14, 0.35), new THREE.MeshToonMaterial({ color: '#fff4f8' })); pillow.position.set(0, 0.6, -0.72); cot.add(pillow);
+  const blanket = new THREE.Mesh(new THREE.BoxGeometry(0.88, 0.08, 1.0), new THREE.MeshToonMaterial({ color: '#ff9ec0' })); blanket.position.set(0, 0.57, 0.35); cot.add(blanket);
+  for (const sz of [-1, 1]) for (const r of [0.6, -0.6]) { const leg = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.62, 0.05), wood); leg.position.set(0, 0.24, sz * 0.75); leg.rotation.x = r; cot.add(leg); }
+  // (along the wall: west side, a little south of the middle)
+  cot.position.set(cx - 4.05, 0, cz + 1.55); cot.rotation.y = -0.33;
+  g.add(cot);
+  // the stool + the nightlight: a little sun in a jar
+  const st = V(cx - 3.55, 0, cz + 3.0);
+  const stool = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.2, 0.55, 12), wood); stool.position.set(st.x, 0.275, st.z); g.add(stool);
+  const sun = new THREE.Mesh(new THREE.SphereGeometry(0.12, 14, 10), new THREE.MeshToonMaterial({ color: '#ffd34a', emissive: '#ffb020', emissiveIntensity: 0.9 })); sun.position.set(st.x, 0.72, st.z); g.add(sun);
+  for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; const ray = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.09, 5), new THREE.MeshToonMaterial({ color: '#ffd34a', emissive: '#ffb020', emissiveIntensity: 0.6 })); ray.position.set(st.x + Math.cos(a) * 0.17, 0.72 + Math.sin(a) * 0.17, st.z); ray.rotation.z = a - Math.PI / 2; g.add(ray); }
+  const jar = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.18, 0.4, 14, 1, true), new THREE.MeshToonMaterial({ color: '#ffe0ec', transparent: true, opacity: 0.35, side: THREE.DoubleSide })); jar.position.set(st.x, 0.75, st.z); g.add(jar);
+  const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.21, 0.21, 0.05, 14), new THREE.MeshToonMaterial({ color: '#ff7aa8' })); lid.position.set(st.x, 0.97, st.z); g.add(lid);
+  const gl = glow('#ffd34a', 1.3, 0.6); gl.position.set(st.x, 0.74, st.z); g.add(gl);
+  L.deco(g);
+  L.col({ kind: 'box', min: V(cx - 4.6, 0, cz + 0.55), max: V(cx - 3.5, 0.62, cz + 2.55) });
+  L.col({ kind: 'cyl', x: st.x, z: st.z, r: 0.24, y0: 0, y1: 1.0 });
+  return V(st.x, 0.72, st.z);
 }
 
 /** Ноки's black umbrella (by day in the hub, docs/script-fangs.md §13.5), held over her right shoulder */
@@ -1171,6 +1414,7 @@ export const HUB_SCRIPTS = {
   scripts: {
     hub_arrival: hubArrival,
     hub_lab_meet: labMeet,
+    hub_lab_card: labCard,
     hub_lab_plan: labPlan,
   } as Record<string, (L: Level3D) => Script>,
   special: {} as Record<string, (L: Level3D) => void>,

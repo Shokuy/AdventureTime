@@ -114,7 +114,7 @@ export function createShepot(): ShepotRig {
   // Карамель's huge garden apron, down to his heels (v2 §2.3): a sage-green bib with a pocket, a strap round the neck
   const apronM = M.get('#8aa878'), apronD = M.get('#6a8a5a');
   part(sb, G.sphere(), apronM, [0, 0.36, 0.12], [0.3, 0.36, 0.16]);
-  part(sb, G.sphere(), apronM, [0, 0.12, 0.2], [0.5, 0.12, 0.32]); // the hem spread on the bed around him
+  part(sb, G.sphere(), apronM, [0, 0.1, 0.2], [0.3, 0.07, 0.24]); // the hem spread on the bed in front of him
   part(sb, G.sphere(), apronD, [0, 0.3, 0.27], [0.12, 0.08, 0.03], undefined, { cast: false }); // the pocket
   part(sb, G.torus(0.13, 0.015, 6, 14), apronD, [0, 0.66, 0.02], 1, [Math.PI / 2 - 0.3, 0, 0]);
   const paws: THREE.Group[] = [];
@@ -125,8 +125,8 @@ export function createShepot(): ShepotRig {
     paws.push(a);
   }
   // the page: a folded yellowed sheet with a few lines of handwriting
-  const page = grp(paws[0], [0, -0.3, 0.06]);
-  part(page, boxGeo(), M.get('#f0dca0'), [0, 0, 0], [0.16, 0.2, 0.012]);
+  const page = grp(sb, [0.04, 0.6, 0.34], [-0.25, 0, 0.12]); // (held up in front of his chest)
+  part(page, boxGeo(), M.get('#f0dca0'), [0, 0, 0], [0.22, 0.28, 0.012]);
   for (let i = 0; i < 4; i++) part(page, boxGeo(), basic('#8a6a3a'), [0, 0.06 - i * 0.04, 0.008], [0.11, 0.008, 0.002], undefined, { cast: false });
   page.visible = false;
 

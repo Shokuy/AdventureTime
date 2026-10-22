@@ -57,7 +57,7 @@ export function fangs5Level(): Level3Def {
     spawn: [0, 0, 78], yaw: Math.PI, killY: -22,
     bg: '#2a0d20', fog: ['#3a1028', 40, 160],
     hemi: ['#d07890', '#2c1022', 0.9], sun: { color: '#ff9e9e', intensity: 1.2, dir: [0, 0.32, -1] },
-    startScript: 'fangs5_intro',
+    startScript: 'fangs5_cold',
     castScenes: true,
     fallLimit: 9,
     deathText: F5.death[Math.floor(Math.random() * F5.death.length)],

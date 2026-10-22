@@ -2,7 +2,8 @@
  * «Ночь клыков», Серия 5 «Чёрный перевал» (episode `fangs4`, level `fangs4_pass`): the mountain road to Замок
  * Полночь — collapsing rope bridges, wind gusts on a ridge, a cliff climb, a bat swarm down a ravine, the ruins of the
  * old world with grey goats and an ambush, and the twin sisters Ночка / Тенька at the Солнечный камень; then the
- * third ingredient, the Солнечный сироп and Ноки's confession at the campfire (docs/script-fangs.md §8).
+ * third ingredient, the Солнечный сироп, Карамель's page at the campfire (the arc's twist) and the kingdom's lights
+ * going out (docs/script-fangs-v2.md §8).
  * Imported once from arc/index.ts.
  */
 import { wait } from '../../../../game/coroutine';
@@ -36,6 +37,7 @@ addScripts(FANGS4_SCRIPTS, {
       r.twins.vanishAll();
       r.stoneK = 1;
       r.fire.set(true);
+      r.wind.strength = 0;
       setExit(L);
     } else if (L.seen.has('fangs4_boss_intro')) {
       // a retry of the fight (solo respawn / co-op team restart): the twins greet the team again (§12)

@@ -16,10 +16,12 @@ import { PollenMotes, Footprints, PollenFlower } from './pollen';
 import { SprinklerCart, Sprinkler } from './movers';
 import { Whispers } from './whisper';
 import { Cast } from './cast';
-import { castMouths } from './speech';
+import { castMouths, speakingNow } from './speech';
 import { ARENA, type Shepot3 } from './boss';
 import { WateringCan, Puddles } from './can';
 import { KingMirror } from './kingMirror';
+import { ShadowGirl } from '../vampires/shadowGirl';
+import type { Panel } from './mirrors';
 import { SIGNS, DEATH, WHISPERS, FOUR, HELP, TOAST, NOTES, NAMES, MAZE_GIRL, ECHO, TOSHA_WING, echoOf, type Bk } from './lines';
 
 /*
@@ -83,7 +85,7 @@ export function fangs3Level(): Level3Def {
     spawn: [0, 0, 70], yaw: Math.PI, killY: -4,
     bg: '#20102a', fog: ['#2a1430', 40, 200],
     hemi: ['#9aa0e0', '#2a1d40', 1.0], sun: { color: '#ffb8c0', intensity: 1.5, dir: [-0.4, 0.66, -0.64] },
-    startScript: 'fangs3_intro',
+    startScript: 'fangs3_cold',
     castScenes: true,
     deathText: DEATH[Math.floor(Math.random() * DEATH.length)],
     build(L) { new Garden(L); },
@@ -146,7 +148,10 @@ export class Garden implements Netted {
   private notesRead = new Set<string>();
   private noteAt: { key: string; pos: THREE.Vector3 }[] = [];
   /** the shadow girl in the maze's mirrors (where she stands behind the glass, eased) */
-  private girl = { pos: V(0, 0, -86), on: 0, flip: false };
+  private girl: ShadowGirl;
+  private girlAt: Panel | null = null;
+  private girlT = 0;
+  private mazePanels: Panel[] = [];
 
   constructor(readonly L: Level3D) {
     L.refs.garden = this;
@@ -157,6 +162,7 @@ export class Garden implements Netted {
     this.feet.onStamp = (x, z) => { if (Math.hypot(x - L.player.pos.x, z - L.player.pos.z) < 6) this.four('tosha'); };
     this.whispers = new Whispers(L);
     this.refl = new Reflections(L, () => this.ghosts());
+    this.girl = new ShadowGirl(L);
     this.can = new WateringCan(L);
     this.puddles = new Puddles(L);
     if (L.seen.has('fangs3_cold')) this.dropCan();
@@ -358,17 +364,17 @@ export class Garden implements Netted {
     const ph = 4;
     for (const [r, cs] of Object.entries(H)) for (const c of cs) {
       const p = mirrorPanel(L, B, -12 + 3 * c + 1.5, 0, -83 - 3 * Number(r), 3, ph, V(0, 0, 1));
-      this.refl.add(p); this.refl.add(backOf(p));
+      this.refl.add(p); this.refl.add(backOf(p)); this.mazePanels.push(p, backOf(p));
     }
     for (const [c, rs] of Object.entries(Vw)) for (const r of rs) {
       const p = mirrorPanel(L, B, -12 + 3 * Number(c), 0, -83 - 3 * r - 1.5, 3, ph, V(1, 0, 0));
-      this.refl.add(p); this.refl.add(backOf(p));
+      this.refl.add(p); this.refl.add(backOf(p)); this.mazePanels.push(p, backOf(p));
     }
     // the far wall: eight mirrors, one of them a doorway (the way out shows in the other mirrors)
     for (let c = 0; c < 8; c++) {
       const fake = c === MAZE_EXIT_C;
       const p = mirrorPanel(L, B, -12 + 3 * c + 1.5, 0, -101.3, 3, ph + 1, V(0, 0, 1), { fake });
-      this.refl.add(p);
+      this.refl.add(p); this.mazePanels.push(p);
       if (!fake) this.refl.add(backOf(p));
       else this.exitAt = V(-12 + 3 * c + 1.5, 0, -101.3);
     }
@@ -535,29 +541,40 @@ export class Garden implements Netted {
   /** the maze (§7.2.3): the girl with the guitar stands behind the glass a cell or two ahead of me on the way out —
    *  every mirror around shows her pointing on; in the last cell she points at the mirror that is a doorway */
   private mazeGirl(dt: number) {
-    const L = this.L, p = L.player.pos, gl = this.girl;
+    const L = this.L, p = L.player.pos;
     const inMaze = p.z < -82.5 && p.z > -101.3 && Math.abs(p.x) < 12 && !L.inCutscene;
-    gl.on = Math.max(0, Math.min(1, gl.on + (inMaze ? dt * 1.5 : -dt * 2)));
-    if (!inMaze) return;
+    if (!inMaze) { if (this.girlAt) { this.girl.hide(); this.girlAt = null; } return; }
     if (!this.said.has('girl')) {
       this.said.add('girl');
       this.after(1.4, () => this.barkFor(MAZE_GIRL[0][0], MAZE_GIRL[0][1]));
       this.after(4.6, () => this.barkFor(MAZE_GIRL[1][0], MAZE_GIRL[1][1], 3));
     }
+    if ((this.girlT -= dt) > 0) return;
+    this.girlT = 0.25;
     let c = Math.floor((p.x + 12) / 3), r = Math.floor((-83 - p.z) / 3);
     c = Math.max(0, Math.min(7, c)); r = Math.max(0, Math.min(5, r));
-    // two steps along the way out (fewer near the end); at the exit cell: in the doorway itself
-    let cr = r, cc = c;
-    for (let k = 0; k < 2; k++) {
-      const here = MAZE_DIST.d.get(`${cr},${cc}`);
-      if (here === undefined || here === 0) break;
-      const next = ([[cr + 1, cc], [cr - 1, cc], [cr, cc + 1], [cr, cc - 1]] as [number, number][]).find(([r2, c2]) => MAZE_DIST.open(cr, cc, r2, c2) && MAZE_DIST.d.get(`${r2},${c2}`) === here - 1);
-      if (!next) break;
-      [cr, cc] = next;
+    // the next cell on the way out (at the exit cell: the doorway itself)
+    const here = MAZE_DIST.d.get(`${r},${c}`) ?? 0;
+    const next = here > 0 ? ([[r + 1, c], [r - 1, c], [r, c + 1], [r, c - 1]] as [number, number][]).find(([r2, c2]) => MAZE_DIST.open(r, c, r2, c2) && MAZE_DIST.d.get(`${r2},${c2}`) === here - 1) : null;
+    const goal = next ? V(cellX(next[1]), 0, cellZ(next[0])) : V(this.exitAt.x, 0, this.exitAt.z - 1.5);
+    // the mirror she shows in: one facing my camera, near me, in view, closest to the way on
+    const cam = L.tcam.cam;
+    let best: Panel | null = null, bs = Infinity;
+    for (const pn of this.mazePanels) {
+      if (pn.c.distanceTo(p) > 7.5) continue;
+      if (v1.copy(cam.position).sub(pn.c).dot(pn.n) < 0.3) continue;
+      const ndc = v1.copy(pn.c).setY(1.6).project(cam);
+      if (ndc.z > 1 || Math.abs(ndc.x) > 0.85 || Math.abs(ndc.y) > 0.9) continue;
+      if (pn.fake && next) continue;
+      const sc = pn.c.distanceTo(goal) + (pn.fake ? -3 : 0);
+      if (sc < bs) { bs = sc; best = pn; }
     }
-    const at = cr === 5 && cc === MAZE_EXIT_C && r === 5 && c === MAZE_EXIT_C ? V(this.exitAt.x, 0, this.exitAt.z - 1.4) : V(cellX(cc), 0, cellZ(cr));
-    gl.flip = at.x < p.x;
-    gl.pos.lerp(at, Math.min(1, dt * 2.5));
+    if (!best) { if (this.girlAt) { this.girl.hide(); this.girlAt = null; } return; }
+    if (best === this.girlAt) return;
+    this.girlAt = best;
+    const toGoal = v1.copy(goal).sub(best.c);
+    const side = toGoal.dot(best.u) >= 0 ? 'right' : 'left';
+    this.girl.inMirror(V(best.c.x, 0.25, best.c.z), best.n, side, 0.95);
   }
 
   /** what the mirrors show (every machine, from what it draws) */
@@ -576,7 +593,6 @@ export class Garden implements Netted {
     const b = this.boss?.ghost();
     if (b) out.push({ kind: 'boss', pos: b, h: 2.7 });
     if (!this.way[3].m.locked || this.L.player.pos.z > -112) out.push({ kind: 'exit', pos: this.exitAt, h: 3.6 });
-    if (this.girl.on > 0.02) out.push({ kind: 'girl', pos: this.girl.pos, h: 1.5, flip: this.girl.flip, alpha: this.girl.on });
     if (this.sceneGhosts) out.push(...this.sceneGhosts);
     return out;
   }
@@ -619,7 +635,7 @@ export class Garden implements Netted {
     for (const m of this.arenaMirrors) { m.update(dt); m.interact(p, busy || !this.fight); }
     for (const d of this.doors) d.update(dt);
     this.domeDoor.update(dt); this.exitDoor.update(dt);
-    for (const f of [...this.flowers, ...this.arenaFlowers]) f.update(dt, () => this.hint('pollen', TOAST.pollen));
+    for (const f of [...this.flowers, ...this.arenaFlowers]) f.update(dt, () => { if (!L.inCutscene) this.hint('pollen', TOAST.pollen); });
     for (const m of this.motes) m.update(dt);
     for (const c of this.carts) c.update(dt);
     for (const s of this.sprinklers) s.update(dt);
@@ -628,6 +644,7 @@ export class Garden implements Netted {
     this.bedCrystal.spin(dt);
     this.bud.update(dt);
     this.can.update(dt);
+    this.kingMirror.talk = speakingNow(L) === 'polnoch' ? Math.abs(Math.sin(L.t * 15)) : 0;
     this.kingMirror.update(dt);
     this.mazeGirl(dt);
     // Карамель's notes: reading one (standing at it), a bark of the four (§7.2.2)
@@ -774,7 +791,7 @@ export class Garden implements Netted {
   }
 
   plugin(): LevelPlugin {
-    return { update: (dt) => this.update(dt), draw: (ctx) => this.draw(ctx), dispose: () => { this.whispers.clear(); } };
+    return { update: (dt) => this.update(dt), draw: (ctx) => this.draw(ctx), dispose: () => { this.whispers.clear(); this.girl.dispose(); } };
   }
 }
 

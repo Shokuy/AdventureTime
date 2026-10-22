@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Level3D, Npc3, Actor3 } from '../../level';
 import type { HeroKind } from '../../../../net/profile';
+import { safeMark, type SafeMarkOpts } from '../shared/safeMark';
 
 /**
  * The story cast of the scenes (GDD §8 «сюжетный состав»): NPC figures of Тоша, Бублик, Ноки and Пастила stand on
@@ -24,10 +25,14 @@ export function cast(L: Level3D): Record<CastKind, Npc3> {
   return c;
 }
 
-/** put a cast figure on its mark (feet at y), facing yaw, shown */
-export function mark(L: Level3D, k: CastKind, x: number, y: number, z: number, yaw: number, state = 'idle') {
+/**
+ * put a cast figure on its mark (feet at y), facing yaw, shown. Every mark goes through `safeMark` (v2 §0: never in a
+ * wall, never under a roof; dev warns when it had to move one); `o === false` places it exactly (a seat, a rock).
+ */
+export function mark(L: Level3D, k: CastKind, x: number, y: number, z: number, yaw: number, state = 'idle', o: SafeMarkOpts | false = {}) {
   const n = cast(L)[k];
-  n.root.position.set(x, y, z);
+  if (o === false) n.root.position.set(x, y, z);
+  else n.root.position.copy(safeMark(L, new THREE.Vector3(x, y, z), { label: `f4 ${CAST_NAME[k]}`, ...o }));
   n.root.rotation.y = yaw;
   n.root.visible = true;
   n.anim.state = state; n.anim.expr = 'normal'; n.anim.speed = 0; n.anim.attack = null; n.anim.fx = {};

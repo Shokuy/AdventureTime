@@ -98,19 +98,19 @@ function diorama(L: Level3D, from: THREE.Vector3, dir: THREE.Vector3, dist: numb
   g.position.copy(base);
   g.lookAt(from.x, base.y, from.z);
   const rock = new THREE.Mesh(new THREE.ConeGeometry(16, 34, 7), dark); rock.position.y = 17; g.add(rock);
-  const towers: [number, number, number][] = [[0, 22, 3.2], [-6, 15, 2.2], [6, 17, 2.4], [-2.2, 27, 1.5]];
+  const towers: [number, number, number][] = [[0, 22, 3.6], [-6, 15, 2.2], [6, 17, 2.4], [-2.2, 27, 1.5]];
   for (const [x, h, r] of towers) {
     const t = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 10), dark); t.position.set(x, 30 + h / 2, 0); g.add(t);
     const c = new THREE.Mesh(new THREE.ConeGeometry(r * 1.3, r * 2.4, 10), dark); c.position.set(x, 30 + h + r * 1.2, 0); g.add(c);
   }
   // the window of the tall tower, facing the camera: glow + the King
-  const winLocal = V(0, 45, 3.3);
-  const king = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 3.6), new THREE.MeshBasicMaterial({ map: windowTex(), fog: false, transparent: true }));
+  const winLocal = V(0, 44, 3.7);
+  const king = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 5.1), new THREE.MeshBasicMaterial({ map: windowTex(), fog: false, transparent: true }));
   king.position.copy(winLocal); g.add(king);
-  const halo = new THREE.Mesh(new THREE.CircleGeometry(3.4, 24), flat('#ff4a4a', { transparent: true, opacity: 0.25, depthWrite: false, blending: THREE.AdditiveBlending }));
+  const halo = new THREE.Mesh(new THREE.CircleGeometry(4.4, 24), flat('#ff4a4a', { transparent: true, opacity: 0.25, depthWrite: false, blending: THREE.AdditiveBlending }));
   halo.position.copy(winLocal).add(V(0, 0, -0.05)); g.add(halo);
-  const girl = new THREE.Mesh(new THREE.PlaneGeometry(0.7, 1.05), new THREE.MeshBasicMaterial({ map: girlTex(), fog: false, transparent: true, opacity: 0, depthWrite: false }));
-  girl.position.copy(winLocal).add(V(0.2, -0.8, 0.06)); g.add(girl);
+  const girl = new THREE.Mesh(new THREE.PlaneGeometry(1.0, 1.5), new THREE.MeshBasicMaterial({ map: girlTex(), fog: false, transparent: true, opacity: 0, depthWrite: false }));
+  girl.position.copy(winLocal).add(V(0.3, -1.2, 0.06)); g.add(girl);
   // the moon behind (a big disc, its glow)
   const moon = new THREE.Mesh(new THREE.CircleGeometry(15, 40), flat(moonCol));
   moon.position.set(-9, 52, -40); g.add(moon);
@@ -183,7 +183,7 @@ export function* castleTag(L: Level3D, lines: TagLine[], o: CastleTagOpts): Scri
       const mat = D.girl.material as THREE.MeshBasicMaterial;
       // a little hand out, then pressed back in
       mat.opacity = Math.sin(Math.min(1, tug / 1.4) * Math.PI) * 0.95;
-      D.girl.position.x = 0.2 + D.king.position.x + 0.9 * Math.sin(Math.min(1, tug / 1.4) * Math.PI);
+      D.girl.position.x = 0.3 + D.king.position.x + 1.3 * Math.sin(Math.min(1, tug / 1.4) * Math.PI);
     }
   };
   L.updaters.push(upd);
@@ -207,7 +207,7 @@ export function* castleTag(L: Level3D, lines: TagLine[], o: CastleTagOpts): Scri
         // К2: a slow push-in on the window
         flyer.visible = false;
         const w = L.shot(camAt.clone().addScaledVector(dir, 6), D.win.clone().add(V(0, -0.6, 0)), 2.6);
-        const fk = tween(2.6, (k) => { fovKick = -32 - 14 * k; });
+        const fk = tween(2.6, (k) => { fovKick = -32 - 18 * k; });
         yield all(w, fk, wait(0.3));
       }
       if (i === tugAt) { tug = 0; audio.sfx('whoosh', { pitch: 1.6, volume: 0.25 }); }

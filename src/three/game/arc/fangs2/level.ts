@@ -109,7 +109,6 @@ function buildSwamp(L: Level3D) {
   S.island(-10, 66, 3, 0.7); S.willow(-10.5, 66.5, 0.7, 1.1);
   // 6.0: the hummock where the double stood (a tussock with a dead stump)
   S.island(MARK.coldHummock.x, MARK.coldHummock.z, 1.7, 0.7, { grass: 2 });
-  S.willow(MARK.coldHummock.x - 1.6, MARK.coldHummock.z - 1.2, 0.7, 0.8);
   S.island(10, 71, 2.6, 0.7); S.willow(10.2, 71.3, 0.7, 0.9);
   S.reeds(0, 64, 9.5, 40, 1.0);
   S.pads(-12, 56, 6, 22); S.pads(12, 58, 6, 18);
@@ -146,7 +145,7 @@ function buildSwamp(L: Level3D) {
   L.pick('nut', 7.4, 5.9, 16.1, 'nut_fangs2_nest');
   L.crumbLine(13.2, 5.4, 16.1, 8.6, 5.4, 16.1, 5);
   // willows and decor along the walk
-  for (const [x, z, s] of [[-7, 48, 1], [6.5, 40, 0.9], [-6.5, 33, 1.2], [8, 21, 1], [27, 22, 1.1], [15, 4, 1], [28, 6, 0.9], [-12, 18, 1.3]] as const) S.willow(x, z, 0, s);
+  for (const [x, z, s] of [[-16, 43, 1], [6.5, 40, 0.9], [-6.5, 33, 1.2], [8, 21, 1], [27, 22, 1.1], [15, 4, 1], [28, 6, 0.9], [-12, 18, 1.3]] as const) S.willow(x, z, 0, s);
   S.mistBank(0, 40, 22, 14, { opacity: 0.22 });
   S.mistBank(18, 12, 16, 10, { opacity: 0.22 });
 
@@ -439,7 +438,7 @@ export function fangs2Special(L: Level3D) {
     L.runGen((function* () { yield { update: (() => { let t = 0; return (dt: number) => (t += dt) > 1.6; })() }; L.run('fangs2_boss_defeat'); })());
   };
   // v2 §6.4: every «без сил» bursts a batch of her jars — the fireflies fly up and the veranda gets lighter
-  boss.onWindow = () => burstJars(L, 9);
+  boss.onWindow = () => burstJars(L, 6);
   const won = L.seen.has('fangs2_boss_defeat');
   if (won) {
     afterVictory(L, true);
@@ -547,6 +546,11 @@ export function fangs2Plugin(L: Level3D): LevelPlugin | null {
   let mistK = 0, glow = 0, prevY = 1;
   const said = new Set<string>();
   const bg = new THREE.Color();
+  // (the story-in-the-level state, see story() below)
+  let presnyak: Enemy3 | null | undefined, presT = -1;
+  const presAnchor = new THREE.Object3D();
+  L.scene.add(presAnchor);
+  let girl: ShadowGirl | null = null, path = -1, stone = 0, hopping: { update(dt: number): boolean } | null = null, girlBarks = 0, girlT = 0, gone = false, ambushT = 0;
   return {
     update(dt) {
       const R = swampOf(L);
@@ -594,10 +598,6 @@ export function fangs2Plugin(L: Level3D): LevelPlugin | null {
   };
 
   // ── v2 §6.2: the story in the level (local to each machine: what MY hero walks into) ──
-  let presnyak: Enemy3 | null | undefined, presT = -1;
-  const presAnchor = new THREE.Object3D();
-  L.scene.add(presAnchor);
-  let girl: ShadowGirl | null = null, path = -1, stone = 0, hopping: { update(dt: number): boolean } | null = null, girlBarks = 0, girlT = 0, gone = false, ambushT = 0;
   function story(dt: number) {
     const p = L.player.pos;
     const R = swampOf(L)!;
@@ -667,7 +667,10 @@ function squadSay(L: Level3D, kind: 'tosha' | 'bublik' | 'noki' | 'pastila', str
   const NAME = { tosha: 'Тоша', bublik: 'Бублик', noki: 'Ноки', pastila: 'Пастила' } as const;
   const h = L.player.kind === kind ? L.player : L.alivePlayers().find((x) => x !== L.player && (x as unknown as { kind?: string }).kind === kind);
   const root = h ? (h as unknown as { root?: THREE.Object3D }).root : null;
-  ambient(L, () => { if (root) L.bark(root, str, 2.4, 1.9); else L.hud.toast(`${NAME[kind]}: ${str}`, 3.2); });
+  // (a bark anchor of its own on the hero: the level's other barks over him don't wipe this one)
+  let anchor = root?.getObjectByName('f2story') ?? null;
+  if (root && !anchor) { anchor = new THREE.Object3D(); anchor.name = 'f2story'; anchor.position.y = 0.55; root.add(anchor); }
+  ambient(L, () => { if (anchor) L.bark(anchor, str, 2.6, 1.9); else L.hud.toast(`${NAME[kind]}: ${str}`, 3.2); });
 }
 
 const FERRY_A = new THREE.Vector3(21, 1.05, -8.4);

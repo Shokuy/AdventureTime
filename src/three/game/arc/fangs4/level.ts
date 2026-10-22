@@ -37,7 +37,7 @@ export const F4 = {
   /** the summit arena */
   C: new THREE.Vector3(0, 20, -394), R: 15,
   /** the Пастильное королевство far below in the east (8.8 К7: its lights go out) */
-  kingdom: new THREE.Vector3(185, -28, -398),
+  kingdom: new THREE.Vector3(150, -10, -396),
   /** the castle on the horizon */
   castle: new THREE.Vector3(40, 30, -760),
   /** the campfire */
