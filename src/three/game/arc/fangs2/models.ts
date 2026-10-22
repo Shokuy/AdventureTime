@@ -257,8 +257,15 @@ export function createFrogFolk(seed = 0): VRig & { sleepy: number } {
 
 // ═════════════════════════════ КАМЫШ (the frog ferryman) ═════════════════════════════
 export interface SimpleRig { root: THREE.Group; M: Mats; update(dt: number, talk: number, st?: string): void }
-/** an old frog sitting with a punting pole and a straw hat */
-export function createKamysh(): SimpleRig {
+export interface KamyshRig extends SimpleRig {
+  /** the lantern on his pole (hide it: «без фонаря») */
+  lantern: THREE.Group;
+  /** 0 = empty lantern, 1 = the last firefly glowing inside */
+  lit: number;
+}
+/** an old frog sitting with a punting pole and a straw hat. `double`: Морок's copy of him (6.0) — the same frog with a
+ *  grin far too wide and red pupils */
+export function createKamysh(o: { double?: boolean } = {}): KamyshRig {
   const M = new Mats();
   const root = new THREE.Group(); root.name = 'kamysh';
   const skin = M.get('#7fb35a'), skinD = M.get('#5f8c3e'), belly = M.get('#e8eac0');
@@ -275,8 +282,9 @@ export function createKamysh(): SimpleRig {
   part(head, G.sphere(), belly, [0, -0.07, 0.1], [0.25, 0.1, 0.18], undefined, fo);
   for (const s of [1, -1]) part(head, G.sphere(), skin, [s * 0.15, 0.12, 0.03], [0.12, 0.12, 0.12]);
   const E = eyes(head, M, { x: 0.15, y: 0.14, z: 0.09, r: 0.075, lid: '#6a9a4a' });
-  const mouth = part(head, G.ball(), basic('#5a1a20'), [0, -0.04, 0.25], [0.12, 0.02, 0.02], undefined, fo);
-  part(head, G.arc(0.15, 0.012, Math.PI), basic('#1b1214'), [0, 0, 0.24], [1, 0.45, 1], [0, 0, Math.PI], fo);
+  const mouth = part(head, G.ball(), basic('#5a1a20'), [0, -0.04, 0.25], [o.double ? 0.2 : 0.12, 0.02, 0.02], undefined, fo);
+  part(head, G.arc(o.double ? 0.24 : 0.15, 0.012, Math.PI), basic('#1b1214'), [0, 0, 0.24], [1, o.double ? 0.7 : 0.45, 1], [0, 0, Math.PI], fo);
+  if (o.double) for (const p of E.pupils) p.material = basic('#c0103a');
   // a reed in the corner of his mouth
   part(head, G.capsule(0.008, 0.26), M.get('#c8a050'), [0.12, -0.02, 0.28], 1, [0.3, 0, -1.1], fo);
   // straw hat, pushed back so his face shows
@@ -291,11 +299,16 @@ export function createKamysh(): SimpleRig {
   void pole;
   const lantern = grp(arm, [0.12, 1.45, 0.2]);
   part(lantern, G.cyl(), M.get('#3a3a30'), [0, 0, 0], [0.08, 0.14, 0.08]);
-  part(lantern, G.ball(), basic('#8a8a70', { transparent: true, opacity: 0.6 }), [0, 0, 0], 0.07, undefined, fo);
+  const glassM = basic('#8a8a70', { transparent: true, opacity: 0.6 });
+  part(lantern, G.ball(), glassM, [0, 0, 0], 0.07, undefined, fo);
+  // the last firefly: a warm blinking dot inside + its glow
+  const fly = part(lantern, G.ball(), basic('#ffe86a'), [0, 0, 0], 0.03, undefined, fo);
+  const flyGlow = glowSprite('#ffd84a', 0.9, 0.0);
+  lantern.add(flyGlow);
   const blinker = new Blinker();
   let t = Math.random() * 3;
-  return {
-    root, M,
+  const rig: KamyshRig = {
+    root, M, lantern, lit: 0,
     update(dt: number, talk: number, st = 'idle') {
       t += dt;
       body.position.y = 0.05 + Math.sin(t * 1.4) * 0.015;
@@ -303,7 +316,91 @@ export function createKamysh(): SimpleRig {
       mouth.scale.y = 0.02 * (1 + talk * 4);
       arm.rotation.x = st === 'pole' ? Math.sin(t * 1.6) * 0.35 : 0.1;
       const bl = blinker.update(dt);
-      for (const l of E.lids) l.rotation.x = lerp(-0.9, 1.3, Math.max(bl, 0.35));
+      for (const l of E.lids) l.rotation.x = lerp(-0.9, 1.3, Math.max(bl, o.double ? 0.05 : 0.35));
+      const blink = rig.lit * (0.55 + 0.45 * Math.max(0, Math.sin(t * 5.2)));
+      fly.visible = rig.lit > 0.05;
+      flyGlow.material.opacity = blink * 0.9;
+      flyGlow.scale.setScalar(0.5 + blink * 0.9);
+      glassM.color.set(rig.lit > 0.05 ? '#e8d890' : '#8a8a70');
+      M.flash(0);
+    },
+  };
+  return rig;
+}
+
+// ═════════════════════════════ КАР-КАРЫЧ (Морок's raven) ═════════════════════════════
+export interface VoronAnim { st: 'perch' | 'fly' | 'flap' | 'carry' | 'hop'; talk: number }
+export interface VoronRig { root: THREE.Group; M: Mats; update(dt: number, a: VoronAnim): void }
+/** Кар-Карыч: a big scruffy raven, her only honest friend (§2.2). A crest of ruffled feathers, a grey «beard» at the
+ *  throat, heavy brows over yellow eyes, a big chipped beak. Poses: perch (shifts from foot to foot, sighs), fly,
+ *  flap (wings up, scolding), carry (legs down, something in the claws), hop. `talk` opens the beak (a caw). */
+export function createVoron(): VoronRig {
+  const M = new Mats();
+  const root = new THREE.Group(); root.name = 'voron';
+  const ink = M.get('#1a1824'), inkL = M.get('#2c2a40'), grey = M.get('#7a7890'), beakM = M.get('#e0a830'), beakD = M.get('#a8781a');
+  const body = grp(root, [0, 0.34, 0]);
+  part(body, G.sphere(), ink, [0, 0, 0], [0.2, 0.19, 0.3]);
+  part(body, G.sphere(), inkL, [0, 0.04, 0.05], [0.17, 0.16, 0.22], undefined, fo);
+  // the tail: three long feathers
+  for (const s of [-1, 0, 1]) part(body, G.cone(), ink, [s * 0.05, 0.02, -0.36], [0.06, 0.24, 0.02], [-Math.PI / 2 + 0.25, s * 0.25, 0]);
+  const head = grp(body, [0, 0.15, 0.22]);
+  part(head, G.sphere(), ink, [0, 0, 0], [0.15, 0.14, 0.15]);
+  // ruffled crest
+  for (let i = 0; i < 5; i++) part(head, G.cone(), ink, [(i - 2) * 0.03, 0.13, -0.02 - Math.abs(i - 2) * 0.02], [0.03, 0.11, 0.02], [-0.5, 0, (i - 2) * 0.35], fo);
+  // grey throat «beard»
+  for (let i = 0; i < 4; i++) part(head, G.cone(), grey, [(i - 1.5) * 0.04, -0.12, 0.08], [0.03, 0.08, 0.02], [Math.PI + 0.3, 0, (i - 1.5) * 0.2], fo);
+  // eyes: yellow, under heavy brows
+  const eyesL: THREE.Mesh[] = [];
+  for (const s of [1, -1]) {
+    part(head, G.ball(), basic('#ffe070'), [s * 0.085, 0.03, 0.1], [0.04, 0.042, 0.03], undefined, fo);
+    eyesL.push(part(head, G.ball(), basic('#141018'), [s * 0.088, 0.03, 0.125], [0.018, 0.024, 0.01], undefined, fo));
+    part(head, G.capsule(0.015, 0.08), grey, [s * 0.085, 0.085, 0.11], 1, [0, 0, s * -1.25], fo);
+  }
+  // the beak: upper + lower (the lower one opens on a caw)
+  part(head, G.cone(), beakM, [0, 0.0, 0.2], [0.05, 0.17, 0.045], [Math.PI / 2, 0, 0]);
+  const jaw = grp(head, [0, -0.03, 0.12]);
+  part(jaw, G.cone(), beakD, [0, 0, 0.06], [0.04, 0.12, 0.03], [Math.PI / 2, 0, 0], fo);
+  // wings
+  const wings: THREE.Group[] = [];
+  for (const s of [1, -1]) {
+    const pv = grp(body, [s * 0.16, 0.06, 0.02]);
+    const w = part(pv, G.sphere(), inkL, [s * 0.3, 0, -0.06], [0.34, 0.03, 0.16]);
+    w.castShadow = false;
+    for (let i = 0; i < 3; i++) part(pv, G.cone(), ink, [s * (0.5 + i * 0.07), 0, -0.12 - i * 0.02], [0.04, 0.16, 0.015], [-Math.PI / 2, 0, 0], fo);
+    wings.push(pv);
+  }
+  // legs + claws
+  const legs: THREE.Group[] = [];
+  for (const s of [1, -1]) {
+    const lg = grp(body, [s * 0.07, -0.16, 0.03]);
+    part(lg, G.capsule(0.018, 0.14), M.get('#3a3020'), [0, -0.08, 0]);
+    for (const a of [-0.5, 0, 0.5]) part(lg, G.capsule(0.01, 0.06), M.get('#3a3020'), [Math.sin(a) * 0.04, -0.17, Math.cos(a) * 0.04], 1, [Math.PI / 2, a, 0], fo);
+    legs.push(lg);
+  }
+  let t = Math.random() * 4, shift = 0;
+  return {
+    root, M,
+    update(dt, a) {
+      dt = Math.min(dt, 0.05); t += dt;
+      let f = 0, fold = 0, legDown = 0;
+      switch (a.st) {
+        case 'fly': f = Math.sin(t * 11) * 0.9; break;
+        case 'carry': f = Math.sin(t * 13) * 1.0; legDown = 1; break;
+        case 'flap': f = 0.9 + Math.sin(t * 18) * 0.5; break;
+        case 'hop': f = Math.sin(t * 9) * 0.3; fold = 0.4; break;
+        default: f = -0.15 + Math.sin(t * 1.3) * 0.04; fold = 0.8;
+      }
+      wings[0].rotation.z = f; wings[1].rotation.z = -f;
+      wings[0].scale.x = wings[1].scale.x = 1 - fold * 0.55;
+      // perched: shifts from foot to foot, cocks his head
+      shift = a.st === 'perch' ? Math.sin(t * 0.9) : damp(shift, 0, 4, dt);
+      body.rotation.z = shift * 0.06;
+      body.rotation.x = a.st === 'fly' || a.st === 'carry' ? 0.25 : a.st === 'hop' ? -0.1 + Math.abs(Math.sin(t * 9)) * 0.2 : 0;
+      head.rotation.z = a.st === 'perch' ? Math.sin(t * 0.6) * 0.25 : 0;
+      head.rotation.x = -a.talk * 0.25;
+      jaw.rotation.x = a.talk * 0.55;
+      for (const l of legs) l.rotation.x = legDown ? 0.2 : a.st === 'fly' ? 1.1 : 0;
+      for (const e of eyesL) e.scale.y = ((t % 4.1) < 0.12 ? 0.004 : 0.024);
       M.flash(0);
     },
   };
@@ -372,9 +469,22 @@ export function createSvetlyachikha(): GlowRig {
 export interface MorokAnim { st: string; p: number; flash: number; talk: number; speed: number }
 export interface MorokRig { root: THREE.Group; M: Mats; top: number; update(dt: number, a: MorokAnim): void }
 
+export interface LadyRig extends MorokRig {
+  /** the little crow on her shoulder (Кар-Карыч sits there instead when he is a character: hide it) */
+  crow: MorokRig;
+  /** her upper body (a parent for Кар-Карыч on the shoulder: local spot `SHOULDER`) */
+  body: THREE.Group;
+  /** the veil is gone: a freckled frog face under it (6.5, Морося) */
+  setFrog(on: boolean): void;
+  /** her hat with the veil (to fling it off as a separate prop, the rig's copy is hidden by setFrog) */
+  hat: THREE.Group;
+}
+/** where Кар-Карыч perches in `LadyRig.body` space */
+export const SHOULDER = new THREE.Vector3(-0.28, 0.42, -0.02);
+
 /** the veiled lady: tall, a violet gown, a hat with a black veil, red eyes, a crow on her shoulder.
- *  poses: idle taunt cast dazed sit fall walk */
-export function createLady(): MorokRig {
+ *  poses: idle taunt cast dazed sit fall walk. Under the veil — Морося, a frog in freckles (setFrog). */
+export function createLady(): LadyRig {
   const M = new Mats();
   const root = new THREE.Group(); root.name = 'morok-lady';
   const base = grp(root);
@@ -396,31 +506,52 @@ export function createLady(): MorokRig {
     arms.push(a);
   }
   const head = grp(body, [0, 0.58, 0.02]);
-  part(head, G.sphere(), skin, [0, 0, 0], [0.19, 0.22, 0.18]);
-  const E = eyes(head, M, { x: 0.075, y: 0.02, z: 0.14, r: 0.04, pupil: '#e0102a' });
+  // her borrowed face (pale, red eyes) …
+  const lady = grp(head);
+  part(lady, G.sphere(), skin, [0, 0, 0], [0.19, 0.22, 0.18]);
+  const E = eyes(lady, M, { x: 0.075, y: 0.02, z: 0.14, r: 0.04, pupil: '#e0102a' });
   for (const p of E.pupils) p.material = basic('#ff2040');
-  const lips = part(head, G.ball(), M.get('#5a1a4a'), [0, -0.1, 0.16], [0.05, 0.018, 0.02], undefined, fo);
+  const lips = part(lady, G.ball(), M.get('#5a1a4a'), [0, -0.1, 0.16], [0.05, 0.018, 0.02], undefined, fo);
   // the hat + the veil
-  part(head, G.cyl(), black, [0, 0.17, -0.01], [0.3, 0.02, 0.3]);
-  part(head, G.cyl(), black, [0, 0.27, -0.01], [0.15, 0.2, 0.15]);
-  part(head, G.cyl(), gownL, [0, 0.2, -0.01], [0.155, 0.04, 0.155], undefined, fo);
-  const veil = part(head, G.cyl(), M.get('#140a1c', { transparent: true, opacity: 0.55, side: THREE.DoubleSide }), [0, 0.03, 0.02], [0.27, 0.32, 0.25]);
+  const hat = grp(head);
+  part(hat, G.cyl(), black, [0, 0.17, -0.01], [0.3, 0.02, 0.3]);
+  part(hat, G.cyl(), black, [0, 0.27, -0.01], [0.15, 0.2, 0.15]);
+  part(hat, G.cyl(), gownL, [0, 0.2, -0.01], [0.155, 0.04, 0.155], undefined, fo);
+  const veil = part(hat, G.cyl(), M.get('#140a1c', { transparent: true, opacity: 0.55, side: THREE.DoubleSide }), [0, 0.03, 0.02], [0.27, 0.32, 0.25]);
   veil.castShadow = false;
-  const feather = part(head, G.capsule(0.03, 0.4), M.get('#8a3ab0'), [0.12, 0.42, -0.06], 1, [0.4, 0, -0.6]);
+  const feather = part(hat, G.capsule(0.03, 0.4), M.get('#8a3ab0'), [0.12, 0.42, -0.06], 1, [0.4, 0, -0.6]);
   void feather;
+  // … and her own: Морося, a frog in freckles (wide, flat, big eyes on top, a shy little mouth)
+  const frog = grp(head);
+  const fsk = M.get('#8cc46a'), fskD = M.get('#6aa04e'), fbel = M.get('#eef0c8');
+  part(frog, G.sphere(), fsk, [0, -0.02, 0.01], [0.24, 0.17, 0.2]);
+  part(frog, G.sphere(), fbel, [0, -0.08, 0.08], [0.18, 0.08, 0.13], undefined, fo);
+  for (const s of [1, -1]) part(frog, G.sphere(), fsk, [s * 0.11, 0.1, 0.05], [0.09, 0.09, 0.09]);
+  const FE = eyes(frog, M, { x: 0.11, y: 0.12, z: 0.09, r: 0.062, lid: '#7ab05a' });
+  // freckles over the snout and cheeks
+  const frk = basic('#a86a3a');
+  for (const [x, y] of [[-0.12, 0.0], [-0.08, -0.02], [-0.15, -0.03], [0.12, 0.0], [0.08, -0.02], [0.15, -0.03], [-0.03, 0.04], [0.03, 0.045], [0.0, 0.02]] as const) {
+    part(frog, G.ball(), frk, [x, y, 0.17 - Math.abs(x) * 0.35], [0.012, 0.012, 0.006], undefined, fo);
+  }
+  for (const s of [1, -1]) part(frog, G.ball(), M.get('#ff9ab0', { transparent: true, opacity: 0.55 }), [s * 0.15, -0.05, 0.13], [0.035, 0.02, 0.01], undefined, fo);
+  const fmouth = part(frog, G.arc(0.09, 0.01, Math.PI), basic('#3a1a20'), [0, -0.06, 0.19], [1, 0.5, 1], [0, 0, Math.PI], fo);
+  part(frog, G.sphere(), fskD, [0, 0.13, -0.06], [0.06, 0.03, 0.06], undefined, fo);
+  frog.visible = false;
+  void fmouth;
   // the crow on her left shoulder
   const crow = createCrow(false);
   crow.root.scale.setScalar(0.75);
-  crow.root.position.set(-0.27, 0.42, -0.02);
+  crow.root.position.copy(SHOULDER);
   body.add(crow.root);
   // a faint violet haze around her (she is a creature of the fog)
   const aura = glowSprite('#a050ff', 2.6, 0.22);
   aura.position.y = 1.1;
   root.add(aura);
   const blinker = new Blinker();
-  let t = Math.random() * 3, slump = 0, sit = 0, armUp = 0;
+  let t = Math.random() * 3, slump = 0, sit = 0, armUp = 0, frogOn = false;
   return {
-    root, M, top: 1.95,
+    root, M, top: 1.95, crow, body, hat,
+    setFrog(on: boolean) { frogOn = on; frog.visible = on; lady.visible = !on; hat.visible = !on; aura.visible = !on; },
     update(dt, a) {
       dt = Math.min(dt, 0.05); t += dt;
       let wantSlump = 0, wantSit = 0, wantArm = 0, sway = Math.sin(t * 1.4) * 0.05;
@@ -430,6 +561,8 @@ export function createLady(): MorokRig {
         case 'dazed': wantSlump = 1; sway = Math.sin(t * 5) * 0.25; break;
         case 'sit': wantSit = 1; sway = Math.sin(t * 1.6) * 0.12; break;
         case 'fall': wantSlump = 1; break;
+        // (Морося: hiding her face behind her gloves)
+        case 'shy': wantArm = 0; wantSlump = 0.4; break;
       }
       slump = damp(slump, wantSlump, 6, dt); sit = damp(sit, wantSit, 8, dt); armUp = damp(armUp, wantArm, 8, dt);
       base.rotation.z = sway;
@@ -439,9 +572,12 @@ export function createLady(): MorokRig {
       head.rotation.x = slump * 0.3;
       arms[0].rotation.z = 0.15 + armUp * 0.9; arms[1].rotation.z = -0.15 - armUp * (a.st === 'cast' ? 0.9 : 0.25);
       arms[0].rotation.x = -slump * 0.6; arms[1].rotation.x = -slump * 0.6;
+      if (a.st === 'shy') { arms[0].rotation.x = arms[1].rotation.x = -2.3; arms[0].rotation.z = 0.5; arms[1].rotation.z = -0.5; }
       lips.scale.y = 0.018 * (1 + a.talk * 2.5);
+      fmouth.scale.y = 0.5 * (1 + a.talk * 1.6);
       const bl = blinker.update(dt);
       E.whites.forEach((w) => { w.scale.y = 0.044 * (1 - 0.9 * bl); });
+      if (frogOn) for (const l of FE.lids) l.rotation.x = lerp(-0.9, 1.3, Math.max(bl, 0.2));
       crow.update(dt, { st: slump > 0.5 ? 'flap' : 'perch', p: 0, flash: 0, talk: 0, speed: 0 });
       M.flash(a.flash);
     },

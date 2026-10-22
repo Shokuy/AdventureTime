@@ -10,10 +10,13 @@ import { addGrappleRing } from '../../heroes';
 import { vamp, markCharacter } from '../vampires';
 import { SwampKit, SinkPlank, Raft, FireflySwarm, FireflyJar, Drawbridge, FIREFLY_LIGHT_R } from './props';
 import { Morok3, ARENA } from './boss';
-import { createSvetlyachikha, type GlowRig } from './models';
+import { createSvetlyachikha, createVoron, type GlowRig, type VoronRig, type VoronAnim } from './models';
 import { frogBarks } from './enemies';
 import { talkingNow } from './speech';
-import { SIGNS, TOASTS, SQUAD, DEATH, FROG_BRIDGE } from './lines';
+import { ShadowGirl } from '../vampires/shadowGirl';
+import { ambient } from '../vampires';
+import type { Enemy3 } from '../../enemies';
+import { SIGNS, TOASTS, SQUAD, DEATH, FROG_BRIDGE, TITLE, PRESNYAK, SHADOW, SHOUT, MOROK } from './lines';
 
 /**
  * «Туманные топи» (series 3, `fangs2_swamp`) — the level. North (−z) from Камыш's pier:
@@ -35,7 +38,18 @@ export const MARK = {
   chair: new THREE.Vector3(-8, ARENA.y, -166.2),
   bottle: new THREE.Vector3(-8, ARENA.y, -174.5),
   exitBoat: new THREE.Vector3(6.2, 0.75, -157),
+  /** 6.0: Камыш's boat 6 m north of the pier, the hummock 5 m west of it (on land) */
+  coldBoat: new THREE.Vector3(-6, -0.1, 49),
+  coldHummock: new THREE.Vector3(-11.2, 0.7, 49),
+  /** 6.5: where she falls (the water side of the veranda) and where Камыш's boat docks */
+  defeat: new THREE.Vector3(1.7, ARENA.y, -157),
+  defeatBoat: new THREE.Vector3(5.6, -0.1, -157),
 };
+/** 6.2.3 the real tussocks the shadow hops over (the mist: from the island past the wisps to the clearing; after the fork to the house) */
+const TUSSOCKS: THREE.Vector3[][] = [
+  [[20, -87.5], [16.5, -93], [14, -97], [11.5, -101], [8, -104], [5.5, -107.5], [2, -112]].map(([x, z]) => new THREE.Vector3(x, 0.65, z)),
+  [[-3, -134.5], [-4, -138.2], [-7, -141.8], [-8, -145.5]].map(([x, z]) => new THREE.Vector3(x, 0.65, z)),
+];
 
 export interface SwampRefs {
   kit: SwampKit;
@@ -47,6 +61,13 @@ export interface SwampRefs {
   bottle: THREE.Group;
   jars: THREE.InstancedMesh;
   jarGlow: THREE.Points;
+  /** jars burst so far (the fight: one batch per «без сил») */
+  jarPopped: Set<number>;
+  /** the light the freed fireflies make over the veranda (0..1) */
+  arenaLight: THREE.PointLight;
+  arenaSwarm: FireflySwarm;
+  /** the far castle silhouette (hidden for the castle tag, which brings its own) */
+  castleG: THREE.Group;
   houseSwarm: FireflySwarm;
   ferry: Raft;
 }
@@ -54,12 +75,12 @@ export const swampOf = (L: Level3D) => L.refs.fangs2 as SwampRefs | undefined;
 
 export function fangs2Level(): Level3Def {
   return {
-    id: 'fangs2_swamp', chapter: 0, title: 'Туманные топи', subtitle: 'Серия 3',
+    id: 'fangs2_swamp', chapter: 0, title: TITLE.title, subtitle: TITLE.subtitle,
     music: 'swamp',
     spawn: [MARK.spawn.x, MARK.spawn.y, MARK.spawn.z], yaw: Math.PI, killY: -6,
     bg: '#0f1a1c', fog: ['#1a2a2a', 16, 70],
     hemi: ['#7d9cb0', '#22301e', 0.9], sun: { color: '#c4d0ff', intensity: 1.4, dir: [-0.45, 0.62, -0.65] },
-    startScript: 'fangs2_intro',
+    startScript: 'fangs2_cold',
     castScenes: true,
     deathText: DEATH.bog,
     build: buildSwamp,
@@ -73,7 +94,9 @@ function buildSwamp(L: Level3D) {
   const S = new SwampKit(L, 7);
   L.refs.swamp = S;
   S.water(-90, -240, 100, 120);
-  S.castle(new THREE.Vector3(-0.45, 0, -0.65));
+  const castleG = S.castle(new THREE.Vector3(-0.45, 0, -0.65));
+  // the castle tags look this way (shared castleTag: L.refs.castleAt)
+  L.refs.castleAt = new THREE.Vector3(-0.45 * 420, 80, -0.65 * 420);
 
   // ═══════════ A. the pier ═══════════
   S.deck(-5, 56, 5, 72, 1.0, { alongX: true });
@@ -84,6 +107,9 @@ function buildSwamp(L: Level3D) {
   // a mooring post with an empty lantern
   const moor = new THREE.Mesh(G.cyl(), S.bark); moor.position.set(-4.6, 1.6, 58); moor.scale.set(0.16, 3.2, 0.16); L.deco(moor);
   S.island(-10, 66, 3, 0.7); S.willow(-10.5, 66.5, 0.7, 1.1);
+  // 6.0: the hummock where the double stood (a tussock with a dead stump)
+  S.island(MARK.coldHummock.x, MARK.coldHummock.z, 1.7, 0.7, { grass: 2 });
+  S.willow(MARK.coldHummock.x - 1.6, MARK.coldHummock.z - 1.2, 0.7, 0.8);
   S.island(10, 71, 2.6, 0.7); S.willow(10.2, 71.3, 0.7, 0.9);
   S.reeds(0, 64, 9.5, 40, 1.0);
   S.pads(-12, 56, 6, 22); S.pads(12, 58, 6, 18);
@@ -257,9 +283,48 @@ function buildSwamp(L: Level3D) {
   };
   for (const n of Object.values(cast)) n.root.visible = false;
   const boss = new Morok3(L, MARK.chair);
+  // the light of the freed fireflies over the veranda: off until her jars start to burst (created now — no shader rebuild later)
+  const arenaLight = new THREE.PointLight('#ffd870', 0, 26, 1.4);
+  arenaLight.position.set(ARENA.cx, ARENA.y + 5.5, ARENA.cz - 2);
+  L.scene.add(arenaLight);
+  const arenaSwarm = new FireflySwarm(L, new THREE.Vector3(ARENA.cx, ARENA.y + 2.6, ARENA.cz - 1), 9, 90, { height: 3, on: false });
+  // a raven on the willow by the clearing: he spots you and flies home to her (6.2.4, the ambush)
+  const scout = new Scout(L, new THREE.Vector3(-4.2, 4.2, -110.2));
+  L.refs.f2scout = scout;
   S.finish();
-  const refs: SwampRefs = { kit: S, boss, bridge, cast, ferry, ...house };
+  const refs: SwampRefs = { kit: S, boss, bridge, cast, ferry, ...house, jarPopped: new Set(), arenaLight, arenaSwarm, castleG };
   L.refs.fangs2 = refs;
+}
+
+/** Кар-Карыч on watch over the clearing (local visuals: he takes off when the ambush starts, on every machine) */
+class Scout {
+  rig: VoronRig = createVoron();
+  g = new THREE.Group();
+  anim: VoronAnim = { st: 'perch', talk: 0 };
+  private fly = -1;
+  constructor(readonly L: Level3D, readonly at: THREE.Vector3) {
+    this.g.add(this.rig.root); this.g.position.copy(at); this.g.rotation.y = 0.6;
+    L.scene.add(this.g);
+    markCharacter(this.rig.root);
+  }
+  takeOff() { if (this.fly < 0) this.fly = 0; }
+  update(dt: number) {
+    if (!this.g.visible) return;
+    this.anim.talk = Math.max(0, this.anim.talk - dt * 2);
+    if (this.fly >= 0) {
+      this.fly += dt;
+      // a flap on the branch, then off north to the house
+      if (this.fly < 0.7) this.anim.st = 'flap';
+      else {
+        this.anim.st = 'fly';
+        const k = this.fly - 0.7;
+        this.g.position.set(this.at.x - k * 2.5, this.at.y + k * 2.2, this.at.z - k * 9);
+        this.g.rotation.y = Math.PI + 0.25;
+        if (k > 6) this.g.visible = false;
+      }
+    }
+    this.rig.update(dt, this.anim);
+  }
 }
 
 /** the house on stilts: walls with a wide door, a thatched roof, hundreds of jars under the eaves, the big bottle inside */
@@ -373,12 +438,15 @@ export function fangs2Special(L: Level3D) {
     if (!L.authority) return;
     L.runGen((function* () { yield { update: (() => { let t = 0; return (dt: number) => (t += dt) > 1.6; })() }; L.run('fangs2_boss_defeat'); })());
   };
+  // v2 §6.4: every «без сил» bursts a batch of her jars — the fireflies fly up and the veranda gets lighter
+  boss.onWindow = () => burstJars(L, 9);
   const won = L.seen.has('fangs2_boss_defeat');
   if (won) {
     afterVictory(L, true);
-    // rebuilt between the defeat and the ending: the ending (it opens the way home) still has to play
+    // rebuilt between the defeat and the ending (or the ending and the tag): what's left of it still has to play
     const nl = L.nl;
-    if (!L.seen.has('fangs2_ending') && L.authority) L.runGen((function* () { yield nl ? { update: () => !nl.waiting } : undefined; L.run('fangs2_ending'); })());
+    const next = !L.seen.has('fangs2_ending') ? 'fangs2_ending' : !L.seen.has('fangs2_tag') ? 'fangs2_tag' : null;
+    if (next && L.authority) L.runGen((function* () { yield nl ? { update: () => !nl.waiting } : undefined; L.run(next); })());
   }
   else if (L.seen.has('fangs2_boss_intro')) {
     // a restart in the fight (solo respawn / co-op team wipe): Морок greets you again, the fight goes on
@@ -410,6 +478,37 @@ export function showCastSolo(L: Level3D) {
   R.boss.setCast(kinds.map((k) => R.cast[k]));
 }
 
+/** a fixed shuffle of the jars (the same on every machine) */
+const JAR_ORDER = (() => { const a = Array.from({ length: 70 }, (_, i) => i); let r = 7; for (let i = a.length - 1; i > 0; i--) { r = (r * 16807) % 2147483647; const j = r % (i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; })();
+/** burst `n` of her jars (local visuals, every machine): sparks, the fireflies rise, the veranda's light grows */
+export function burstJars(L: Level3D, n: number, quiet = false) {
+  const R = swampOf(L);
+  if (!R) return;
+  const jars = R.jars, N = jars.count;
+  const m4 = new THREE.Matrix4(), zero = new THREE.Matrix4().makeScale(0, 0, 0), p = new THREE.Vector3();
+  let k = 0;
+  for (const i of JAR_ORDER) {
+    if (k >= n) break;
+    if (i >= N || R.jarPopped.has(i)) continue;
+    R.jarPopped.add(i); k++;
+    jars.getMatrixAt(i, m4); p.setFromMatrixPosition(m4);
+    jars.setMatrixAt(i, zero);
+    if (!quiet) { const at = p.clone(); ambient(L, () => { L.fx.sparks(at, 4, ['#e8f8ff', '#ffffff']); L.fx.stars(at, 4, ['#ffe36a', '#fff6c0']); }); }
+  }
+  if (!k) return;
+  jars.instanceMatrix.needsUpdate = true;
+  const f = R.jarPopped.size / N;
+  // the dim glow under the eaves thins out with the jars; the free ones swarm over the veranda
+  (R.jarGlow.material as THREE.PointsMaterial).opacity = 0.45 * (1 - f);
+  R.arenaSwarm.target = Math.min(1, f * 1.6);
+  R.arenaLight.intensity = 9 * Math.min(1, f * 1.4);
+  if (!quiet) ambient(L, () => {
+    audio.sfx('break', { pitch: 1.3, volume: 0.45 });
+    audio.sfx('colorRestore', { pitch: 1.4, volume: 0.35 });
+    if (R.boss.form !== 'dead') L.bark(R.boss.root, MOROK.jars[R.jarPopped.size % MOROK.jars.length], 1.6, 2.4);
+  });
+}
+
 /** the house after the victory: fireflies free, colour back, the bottle cracked (also after a rebuild) */
 export function afterVictory(L: Level3D, quiet: boolean) {
   const R = swampOf(L);
@@ -417,6 +516,8 @@ export function afterVictory(L: Level3D, quiet: boolean) {
   const V = vamp(L);
   R.houseSwarm.target = 1;
   R.jarGlow.visible = false;
+  R.arenaSwarm.target = 1;
+  R.arenaLight.intensity = Math.max(R.arenaLight.intensity, quiet ? 9 : R.arenaLight.intensity);
   if (quiet) { V.zone('house')?.finish(); R.bottle.visible = false; R.motherG.visible = false; }
   R.boss.form = 'dead';
   const sw = new FireflySwarm(L, new THREE.Vector3(-8, 1.4, -160), 22, 260, { height: 7 });
@@ -432,6 +533,9 @@ export function openExit(L: Level3D) {
   const S = R.kit;
   L.refs.f2exit = true;
   const boat = new Raft(S, [MARK.exitBoat.clone(), MARK.exitBoat.clone().add(new THREE.Vector3(0.01, 0, 0))], { r: 1.9, top: 0.75, dwell: 1000, travel: 1, ferry: true });
+  // (the fireflies are back: his lantern glows again)
+  const k = boat.kamysh as unknown as { lit?: number } | null;
+  if (k) k.lit = 1;
   L.refs.f2boat = boat;
   L.exit(4.2, 0, -160, 8.4, 4, -154);
 }
@@ -483,9 +587,87 @@ export function fangs2Plugin(L: Level3D): LevelPlugin | null {
       const big = L.refs.f2bigSwarm as FireflySwarm | undefined;
       if (big) big.target = Math.max(big.target, glow);
       if (R) R.mother.update(dt, R && talkingNow(L) === 'svetlyachikha' ? 1 : 0);
+      (L.refs.f2scout as Scout | undefined)?.update(dt);
+      if (R && !L.inCutscene) story(dt);
       void clamp;
     },
   };
+
+  // ── v2 §6.2: the story in the level (local to each machine: what MY hero walks into) ──
+  let presnyak: Enemy3 | null | undefined, presT = -1;
+  const presAnchor = new THREE.Object3D();
+  L.scene.add(presAnchor);
+  let girl: ShadowGirl | null = null, path = -1, stone = 0, hopping: { update(dt: number): boolean } | null = null, girlBarks = 0, girlT = 0, gone = false, ambushT = 0;
+  function story(dt: number) {
+    const p = L.player.pos;
+    const R = swampOf(L)!;
+    // 6.2.4 her voice over the swamp
+    if (!said.has('sh:village') && p.z < -57 && p.z > -86 && !vamp(L).zone('village')?.done) { said.add('sh:village'); ambient(L, () => L.shout(SHOUT.village, 2.6)); }
+    if (!said.has('sh:wisps') && p.z < -91 && p.z > -112) { said.add('sh:wisps'); ambient(L, () => L.shout(SHOUT.wisps, 2.6)); }
+    const ar = L.arenas[0];
+    if (!said.has('sh:ambush') && ar && ar.state === 'active' && p.distanceTo(ar.center) < 14) {
+      said.add('sh:ambush');
+      const sc = L.refs.f2scout as Scout | undefined;
+      if (sc) { sc.anim.talk = 1; sc.takeOff(); ambient(L, () => { L.bark(sc.g, SHOUT.ambushVoron, 1.8, 0.9); audio.sfx('hiss', { pitch: 2.2, volume: 0.4 }); }); }
+      ambushT = 1.6;
+    }
+    if (ambushT > 0 && (ambushT -= dt) <= 0) ambient(L, () => L.shout(SHOUT.ambush, 2.4));
+    // 6.2.2 the grey frog by the plaza knows the name
+    if (presnyak === undefined) {
+      let best: Enemy3 | null = null, bd = 1e9;
+      for (const e of L.enemies) if (e.kind === 'presnyak' || (e as unknown as { folk?: boolean }).folk) { const d = Math.hypot(e.body.pos.x - 14.5, e.body.pos.z + 59.5); if (d < bd) { bd = d; best = e; } }
+      presnyak = bd < 4 ? best : null;
+    }
+    if (presnyak) {
+      const f = presnyak;
+      if (!f.dead && !said.has('pr:grey') && p.distanceTo(f.body.pos) < 3.6) { said.add('pr:grey'); ambient(L, () => L.bark(f.root, PRESNYAK.grey, 3.0, 1.6)); }
+      if (f.dead && !said.has('pr:thanks')) {
+        if (presT < 0) { presT = 1.4; presAnchor.position.copy(f.body.pos); }
+        else if ((presT -= dt) <= 0) { said.add('pr:thanks'); if (p.distanceTo(presAnchor.position) < 14) ambient(L, () => L.bark(presAnchor, PRESNYAK.thanks, 3.0, 1.6)); }
+      }
+    }
+    // 6.2.3 the shadow on the water: hops ahead over the real tussocks, 4–6 m in front of the nearest hero, stops on every second
+    const want = TUSSOCKS.findIndex((ts) => p.z < ts[0].z + 3 && p.z > ts[ts.length - 1].z - 2 && Math.hypot(p.x - ts[0].x, p.z - ts[0].z) < 40);
+    if (want > path) {
+      {
+        path = want; stone = 0; hopping = null; gone = false;
+        girl ??= new ShadowGirl(L);
+        const ts = TUSSOCKS[path];
+        // (start a little ahead of whoever is nearest)
+        const near = (q: THREE.Vector3) => Math.min(...L.heroes().map((h) => h.pos.distanceTo(q)));
+        while (stone < ts.length - 2 && near(ts[stone]) < 3.5) stone++;
+        girl.hopAhead([ts[stone], ts[stone]], 1);
+      }
+    }
+    if (girl && path >= 0 && !gone) {
+      const ts = TUSSOCKS[path];
+      const near = Math.min(...L.heroes().map((h) => h.pos.distanceTo(ts[stone])));
+      if (hopping && hopping.update(0)) hopping = null;
+      if (!hopping && stone < ts.length - 1 && near < 4.5) {
+        // two hops, then she waits
+        const to = Math.min(ts.length - 1, stone + 2);
+        hopping = girl.hopAhead(ts.slice(stone, to + 1), 3.2);
+        stone = to;
+      }
+      if ((!hopping && stone >= ts.length - 1 && near < 2.5) || want < 0) { girl.hide(); gone = true; }
+      // the four see it (once each; a hero nobody plays speaks from the corner of the screen)
+      if (path === 0 && girlBarks < 3 && near < 9) {
+        if ((girlT -= dt) <= 0) {
+          const k = (['pastila', 'bublik', 'noki'] as const)[girlBarks++];
+          girlT = 2.6;
+          squadSay(L, k, SHADOW[k]);
+        }
+      }
+    }
+  }
+}
+
+/** one of the four says it: over that hero if somebody plays him here (me or a friend), else a toast with the name */
+function squadSay(L: Level3D, kind: 'tosha' | 'bublik' | 'noki' | 'pastila', str: string) {
+  const NAME = { tosha: 'Тоша', bublik: 'Бублик', noki: 'Ноки', pastila: 'Пастила' } as const;
+  const h = L.player.kind === kind ? L.player : L.alivePlayers().find((x) => x !== L.player && (x as unknown as { kind?: string }).kind === kind);
+  const root = h ? (h as unknown as { root?: THREE.Object3D }).root : null;
+  ambient(L, () => { if (root) L.bark(root, str, 2.4, 1.9); else L.hud.toast(`${NAME[kind]}: ${str}`, 3.2); });
 }
 
 const FERRY_A = new THREE.Vector3(21, 1.05, -8.4);

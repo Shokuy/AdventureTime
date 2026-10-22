@@ -15,7 +15,7 @@ import { type SpeakerId as TownSpeaker } from '../town/speech';
  */
 
 export type SpeakerId = 'tosha' | 'bublik' | 'bear' | 'narrator' | 'pastila' | 'noki' | 'polnoch' | 'kisloplyu'
-  | 'netopyr' | 'morok' | 'shepot' | 'nochka' | 'tenka' | 'zefirych' | 'beze' | 'ponchik' | 'marmeladka';
+  | 'netopyr' | 'morok' | 'shepot' | 'shurshik' | 'nochka' | 'tenka' | 'zefirych' | 'beze' | 'ponchik' | 'marmeladka';
 
 interface Speaker { name: string; color: string; bg: string; who?: Who; town?: TownSpeaker }
 export const SPEAKERS: Record<SpeakerId, Speaker> = {
@@ -34,6 +34,8 @@ export const SPEAKERS: Record<SpeakerId, Speaker> = {
   netopyr: { name: 'Граф Нетопырь', color: PORTRAIT_INFO.netopyr.color, bg: PORTRAIT_INFO.netopyr.bg },
   morok: { name: 'Мадам Морок', color: PORTRAIT_INFO.morok.color, bg: PORTRAIT_INFO.morok.bg },
   shepot: { name: 'Шёпот', color: PORTRAIT_INFO.shepot.color, bg: PORTRAIT_INFO.shepot.bg },
+  // (v2 §0: after the garden Шёпот is Шуршик — the same portrait, his own name)
+  shurshik: { name: 'Шуршик', color: PORTRAIT_INFO.shepot.color, bg: PORTRAIT_INFO.shepot.bg },
   nochka: { name: 'Ночка', color: PORTRAIT_INFO.nochka.color, bg: PORTRAIT_INFO.nochka.bg },
   tenka: { name: 'Тенька', color: PORTRAIT_INFO.tenka.color, bg: PORTRAIT_INFO.tenka.bg },
 };
@@ -101,9 +103,9 @@ function drawBox(d: Dialog, ctx: CanvasRenderingContext2D, id: SpeakerId) {
 }
 
 /** the lieutenants speak here only as the little bat-mice they shrank into (§9.2.3) */
-const MICE: Partial<Record<SpeakerId, true>> = { netopyr: true, morok: true, shepot: true, nochka: true, tenka: true };
+const MICE: Partial<Record<SpeakerId, true>> = { netopyr: true, morok: true, shepot: true, shurshik: true, nochka: true, tenka: true };
 
 /** a round portrait for any speaker of this episode: the shared cast portraits (art/portraits.ts) */
 export function face(ctx: CanvasRenderingContext2D, id: SpeakerId, cx: number, cy: number, r: number, t: number, talk: number, expr?: string) {
-  drawPortrait(ctx, id, cx, cy, r, t, talk, expr, MICE[id] ? 'mouse' : undefined);
+  drawPortrait(ctx, id === 'shurshik' ? 'shepot' : id, cx, cy, r, t, talk, expr, MICE[id] ? 'mouse' : undefined);
 }

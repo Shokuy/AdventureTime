@@ -16,14 +16,22 @@ import type { Cast, CastKind } from './cast';
 import { COUNT, HELP, TOAST, BARK } from './lines';
 
 /**
- * Граф Нетопырь — the flying vampire of the town hall's dome (docs/script-fangs.md §5.5–5.7).
+ * Граф Нетопырь — the flying vampire of the town hall's dome (docs/script-fangs-v2.md §5.5–5.7, «Показ мод» in three
+ * outings: teach → test → twist).
  *  • In the air he can't be hurt («В воздухе Граф неуязвим»). He circles the dome, then:
  *      swoop — a screech and a red lane on the floor (telegraph), then he skims the lane low and fast: −1 ♥ to whoever
  *              is on it (a swing that meets him in the swoop knocks him down; flying into a light burns him down);
  *      bombs — «зефирные бомбы» dropped at the heroes' spots (rings on the floor); a swing bats one back at him;
- *      phase 2 (≤ 2/3 HP) — «Мыши, ко мне!»: a flock of scouts; double swoops;
+ *      (v2) before a swoop his monocle glints (a star on his eye + a «ting»), then the screech and the lane;
+ *      phase 2 (≤ 2/3 HP) — «Мыши, ко мне! Второй выход!»: a flock of scouts; double swoops; and «Глоточек»: he hovers
+ *              low over a lit lantern and drinks its colour through a straw for 2 s (a pink ribbon from the lantern to his
+ *              mouth, the `drain` sound) — any hit while he sips knocks him straight down («Я же пил!»); if he finishes,
+ *              the lantern goes out;
  *      phase 3 (≤ 1/3 HP) — «Да будет… ТЬМА!»: every lantern out, the dome goes dark (red-moon flashes now and then, his
- *              eyes glow), he keeps snuffing the lanterns heroes relight (a slow, low approach: a chance to hit him).
+ *              eyes and monocle glow), he keeps snuffing the lanterns heroes relight (a slow, low approach: a chance to
+ *              hit him); and «Софиты»: a lantern lit within 4.5 m of him (or Пастила's beacon) — he can't resist: he
+ *              freezes posing in its beam for 1.5 s («Ах! Софиты!») and drops as if knocked down. A dark lantern near him
+ *              twinkles gold (light me!).
  *  • Knock him down: peas (рогатка), Пастила's syrup, Ноки's chord or pluck, Бублик's hook, a batted bomb — one hit in
  *    solo, a few with a bigger team (stagger). Down, he sits dazed for a few seconds: THEN he takes damage. Then up again.
  *  • Solo (GDD §8): the story three on the dome's rim help when he stays up too long (Пастила's syrup, Ноки's chord,
@@ -50,13 +58,19 @@ const SCALE = 1.25;
 const DOWN_CAP = 0.3;
 const FLY_H = 6.2;
 const ORBIT = 7.2;
-type St = 'perch' | 'fly' | 'tele' | 'dive' | 'climb' | 'bombs' | 'summon' | 'goSnuff' | 'snuff' | 'fall' | 'down' | 'rise' | 'dying' | 'dead';
-const STATES: St[] = ['perch', 'fly', 'tele', 'dive', 'climb', 'bombs', 'summon', 'goSnuff', 'snuff', 'fall', 'down', 'rise', 'dying', 'dead'];
-const AIR: St[] = ['fly', 'tele', 'dive', 'climb', 'bombs', 'summon', 'goSnuff', 'snuff'];
-const ANIM: Partial<Record<St, string>> = { perch: 'perch', fly: 'fly', tele: 'tele', dive: 'dive', climb: 'fly', bombs: 'drop', summon: 'summon', goSnuff: 'fly', snuff: 'snuff', fall: 'hurt', down: 'down', rise: 'rise', dying: 'down', dead: 'down' };
+/** phase 3: his circle is wider (it brushes the rim's lanterns — «Софиты» need him near one) */
+const ORBIT3 = 8.6;
+/** v2 «Софиты»: a lantern lit this close to him (horizontally) makes him pose */
+const SPOT_R = 4.5;
+const SIP_T = 2.0, POSE_T = 1.5;
+type St = 'perch' | 'fly' | 'tele' | 'dive' | 'climb' | 'bombs' | 'summon' | 'goSnuff' | 'snuff' | 'fall' | 'down' | 'rise' | 'dying' | 'dead' | 'goSip' | 'sip' | 'pose';
+const STATES: St[] = ['perch', 'fly', 'tele', 'dive', 'climb', 'bombs', 'summon', 'goSnuff', 'snuff', 'fall', 'down', 'rise', 'dying', 'dead', 'goSip', 'sip', 'pose'];
+const AIR: St[] = ['fly', 'tele', 'dive', 'climb', 'bombs', 'summon', 'goSnuff', 'snuff', 'goSip', 'sip', 'pose'];
+const ANIM: Partial<Record<St, string>> = { perch: 'perch', fly: 'fly', tele: 'tele', dive: 'dive', climb: 'fly', bombs: 'drop', summon: 'summon', goSnuff: 'fly', snuff: 'snuff', fall: 'hurt', down: 'down', rise: 'rise', dying: 'down', dead: 'down', goSip: 'fly', sip: 'sip', pose: 'pose' };
 const MELEE = new Set(['sword', 'swordAlt', 'fork', 'spin', 'punch', 'axe', 'axeAlt', 'axeSpin', 'mill', 'flask', 'flaskAlt']);
 
 const v1 = new THREE.Vector3(), v2 = new THREE.Vector3();
+const UP = new THREE.Vector3(0, 1, 0);
 const pose: NetPose = { pos: new THREE.Vector3(), vel: new THREE.Vector3(), yaw: 0 };
 
 /** a red stripe on the floor: the swoop's lane */
@@ -134,6 +148,13 @@ export class Count3 implements Boss3Like, Netted {
   private hitIds = new Set<string | number>();
   private target: HeroLike | null = null;
   private snuffL: Lantern | null = null;
+  /** v2 «Глоточек»: the lantern he drinks; when he may next */
+  private sipL: Lantern | null = null;
+  private sipCd = 3;
+  /** v2 «Софиты»: the arena lanterns' lit state last frame (host: a lantern that lights up near him) */
+  private litPrev: boolean[] = [];
+  private beam: THREE.Mesh;
+  private sparkT = 0;
   private lane = new Lane();
   private dropMark = new GroundMark('#ffb0d0', true);
   private defeatT = -1;
@@ -157,6 +178,13 @@ export class Count3 implements Boss3Like, Netted {
     markCharacter(this.rig.root);
     this.blob = makeBlob(0.8);
     L.scene.add(this.root, this.blob);
+    // «Софиты»: the beam of the lantern he poses in (every machine draws it from the nearest lit lantern)
+    const bm = basic('#fff2b0', { additive: true, opacity: 0, depthWrite: false });
+    bm.side = THREE.DoubleSide;
+    this.beam = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 1.0, 1, 18, 1, true).translate(0, 0.5, 0), bm);
+    this.beam.visible = false; this.beam.renderOrder = 5;
+    noOutline(this.beam);
+    L.scene.add(this.beam);
     this.hp = this.maxHp = Math.round(BASE_HP * (L.nl ? coop.hpScale() : 1));
     this.pos.copy(env.perch);
     this.root.position.copy(this.pos);
@@ -182,7 +210,8 @@ export class Count3 implements Boss3Like, Netted {
     const c = this.env.c;
     this.orbA = Math.hypot(this.pos.x - c.x, this.pos.z - c.z) > 0.5 ? Math.atan2(this.pos.x - c.x, this.pos.z - c.z) : Math.PI;
     this.go('climb', 1.4);
-    this.cd = 2.5; this.sumCd = 4; this.snuffCd = 5; this.airT = 0;
+    this.cd = 2.5; this.sumCd = 4; this.snuffCd = 5; this.airT = 0; this.sipCd = 3;
+    this.litPrev = this.env.lanterns.map((l) => l.lit);
   }
   private go(s: St, dur = 0) { this.state = s; this.st = 0; this.dur = Math.max(0.001, dur); this.seq++; }
 
@@ -200,7 +229,8 @@ export class Count3 implements Boss3Like, Netted {
   private say(lines: readonly string[] | string, shout = false) {
     const L = this.L;
     if (this.barkCd > 0 && !shout) return;
-    this.barkCd = 2.6;
+    // (v2 §5.6: not more often than once in 3 s; the phase changes always)
+    this.barkCd = 3;
     const s = typeof lines === 'string' ? lines : choose(lines as string[]);
     // (a pea's hit is resolved outside the captured world tick: share it explicitly)
     shared(L, () => { L.bark(this.root, s, 2.0, 3.0); if (shout) L.shout(s, 2.2); });
@@ -233,7 +263,7 @@ export class Count3 implements Boss3Like, Netted {
       case 'fly': {
         this.orbit(dt, 0.55 + 0.12 * this.phase);
         if (t) this.faceTo(t.pos, dt, 5);
-        this.cd -= dt; this.sumCd -= dt; this.snuffCd -= dt;
+        this.cd -= dt; this.sumCd -= dt; this.snuffCd -= dt; this.sipCd -= dt;
         if (this.cd <= 0) this.choose(L);
         break;
       }
@@ -271,7 +301,8 @@ export class Count3 implements Boss3Like, Netted {
       }
       case 'climb': {
         this.orbA = Math.atan2(this.pos.x - c.x, this.pos.z - c.z);
-        this.moveTo(v1.set(c.x + Math.sin(this.orbA) * ORBIT, c.y + FLY_H, c.z + Math.cos(this.orbA) * ORBIT), 8, dt);
+        const R = this.orbitR();
+        this.moveTo(v1.set(c.x + Math.sin(this.orbA) * R, c.y + FLY_H, c.z + Math.cos(this.orbA) * R), 8, dt);
         if (k >= 1) { this.go('fly'); this.cd = rand(1.6, 2.6) * this.cdMul(); }
         break;
       }
@@ -321,6 +352,41 @@ export class Count3 implements Boss3Like, Netted {
         }
         break;
       }
+      // v2 «Глоточек»: down to a lit lantern, then the straw
+      case 'goSip': {
+        const l = this.sipL;
+        if (!l || !l.lit) { this.sipL = null; this.go('fly'); this.cd = 1; break; }
+        this.sipSpot(l, v1);
+        this.moveTo(v1, 7.5, dt);
+        this.faceTo(l.pos, dt, 8);
+        if (this.pos.distanceTo(v1) < 0.35 || k >= 1) {
+          this.go('sip', SIP_T);
+          this.say(COUNT.sip, true);
+          audio.sfx('drain', { pitch: 1.3, volume: 0.8 });
+        }
+        break;
+      }
+      case 'sip': {
+        const l = this.sipL;
+        this.vel.set(0, 0, 0);
+        if (l) { this.sipSpot(l, v1); this.moveTo(v1, 2, dt); this.faceTo(l.pos, dt, 8); }
+        if (!l || !l.lit) { this.sipL = null; this.go('climb', 0.9); this.sipCd = rand(4, 6); break; }
+        if (k >= 1) {
+          l.snuff();
+          this.sipL = null;
+          this.say(['Ах, какой вкус!'], true);
+          this.go('climb', 0.9);
+          this.sipCd = rand(6, 9) * (0.7 + 0.3 * this.cdMul());
+        }
+        break;
+      }
+      // v2 «Софиты»: frozen in the light, then down he goes
+      case 'pose': {
+        this.vel.set(0, 0, 0);
+        this.pos.y -= dt * 0.25;
+        if (k >= 1) this.knock(L, 'spot');
+        break;
+      }
       case 'fall': {
         const gy = c.y;
         this.pos.y = Math.max(gy, this.pos.y - dt * (4 + this.st * 20));
@@ -347,6 +413,7 @@ export class Count3 implements Boss3Like, Netted {
       }
       default: break;
     }
+    this.spotlights(L);
     // phase 3: red-moon flashes now and then
     if (this.phase === 3 && this.dark && (this.flashCd -= dt) <= 0) { this.flashCd = rand(5.5, 8.5); this.moonFlash(); L.nl?.entEvent(this, 'flash', {}); }
     this.soloHelp(L, dt);
@@ -370,6 +437,14 @@ export class Count3 implements Boss3Like, Netted {
     const t = this.pickTarget(L);
     const lit = this.env.lanterns.filter((l) => l.lit);
     if (this.phase >= 2 && this.sumCd <= 0 && L.enemies.filter((e) => e.kind === 'bat' && !e.dead).length < 3) { this.go('summon', 1.3); this.say(COUNT.p2, true); return; }
+    // v2 «Глоточек» (phase 2): the lit lantern nearest a hero — greed in reach of a swing
+    if (this.phase === 2 && this.sipCd <= 0 && lit.length) {
+      let best: Lantern | null = null, bd = Infinity;
+      for (const l of lit) for (const h of L.alivePlayers()) { const d = h.pos.distanceTo(l.pos) + Math.random() * 2; if (d < bd) { bd = d; best = l; } }
+      this.sipL = best ?? lit[0];
+      this.go('goSip', 3.2);
+      return;
+    }
     if (this.phase === 3 && this.snuffCd <= 0 && lit.length) {
       // the lit lantern nearest a hero (he wants them in the dark)
       let best: Lantern | null = null, bd = Infinity;
@@ -384,6 +459,8 @@ export class Count3 implements Boss3Like, Netted {
       this.doubles = this.phase >= 2 ? 1 : 0;
       this.go('tele', this.phase === 3 ? 0.8 : 0.95);
       audio.sfx('batScreech', { pitch: 0.6, volume: 0.8 });
+      // (v2: the monocle's «ting» with its glint)
+      audio.sfx('menuSelect', { pitch: 2.4, volume: 0.55 });
       return;
     }
     this.bombsLeft = 3 + Math.floor(this.heroes() / 2) + (this.phase === 3 ? 1 : 0);
@@ -430,11 +507,38 @@ export class Count3 implements Boss3Like, Netted {
     return best;
   }
 
+  private orbitR() { return this.phase === 3 ? ORBIT3 : ORBIT; }
   private orbit(dt: number, w: number) {
-    const c = this.env.c;
-    this.orbA += w * dt / ORBIT * 6;
+    const c = this.env.c, R = this.orbitR();
+    this.orbA += w * dt / R * 6;
     const y = c.y + FLY_H + Math.sin(this.t * 1.7) * 0.4;
-    this.moveTo(v1.set(c.x + Math.sin(this.orbA) * ORBIT, y, c.z + Math.cos(this.orbA) * ORBIT), 6, dt);
+    this.moveTo(v1.set(c.x + Math.sin(this.orbA) * R, y, c.z + Math.cos(this.orbA) * R), 6, dt);
+  }
+  /** where he hovers to sip a lantern: low, on its inner side, the straw reaching the globe (a swing reaches him) */
+  private sipSpot(l: Lantern, out: THREE.Vector3) {
+    const c = this.env.c;
+    v2.set(c.x - l.pos.x, 0, c.z - l.pos.z).normalize();
+    return out.set(l.pos.x + v2.x * 1.05, c.y + 1.15, l.pos.z + v2.z * 1.05);
+  }
+  /** host, v2 «Софиты»: a lantern lit (or Пастила's beacon set down) near him in the dark — he must pose */
+  private spotlights(L: Level3D) {
+    const ls = this.env.lanterns;
+    for (let i = 0; i < ls.length; i++) {
+      const now = ls[i].lit, was = this.litPrev[i] ?? now;
+      this.litPrev[i] = now;
+      if (now && !was) this.trySpot(L, ls[i].pos);
+    }
+  }
+  trySpot(L: Level3D, at: THREE.Vector3) {
+    if (!L.authority || this.phase !== 3 || !this.dark || !this.airborne) return false;
+    if (this.state === 'dive' || this.state === 'pose' || this.state === 'tele') return false;
+    if (Math.hypot(at.x - this.pos.x, at.z - this.pos.z) > SPOT_R) return false;
+    this.snuffL = null;
+    this.go('pose', POSE_T);
+    this.flash = 1;
+    this.say(COUNT.spot, true);
+    shared(L, () => { L.fx.stars(this.center(v1).setY(this.pos.y + 2.6), 26, ['#fff8d0', '#ffe14a', '#ffffff']); audio.sfx('artifact', { pitch: 1.6, volume: 0.6 }); L.whiteFlash = Math.max(L.whiteFlash, 0.12); });
+    return true;
   }
   private moveTo(p: THREE.Vector3, speed: number, dt: number) {
     v2.copy(p).sub(this.pos);
@@ -459,6 +563,12 @@ export class Count3 implements Boss3Like, Netted {
   private airHit(L: Level3D, kind: string, at: THREE.Vector3) {
     if (!this.airborne) return;
     const melee = MELEE.has(kind);
+    // v2: caught sipping / posing — any hit, down at once («Я же пил!»)
+    if (this.state === 'sip' || this.state === 'pose') {
+      if (this.state === 'sip') this.say(COUNT.sipCaught, true);
+      this.knock(L, kind);
+      return;
+    }
     // a swing that meets him low (the swoop, the snuffing) knocks him down at once; so does a batted bomb or the sun
     if ((melee && (this.state === 'dive' || this.state === 'snuff' || this.state === 'goSnuff')) || kind === 'bomb' || kind === 'sun') { this.knock(L, kind); return; }
     const w = kind === 'chord' ? 2 : 1;
@@ -477,9 +587,10 @@ export class Count3 implements Boss3Like, Netted {
     this.go('fall', 1.2);
     this.flash = 1;
     this.snuffL = null;
+    this.sipL = null;
     const c = this.env.c;
     this.clampIn(this.pos, 1.8);
-    this.say(COUNT.down);
+    if (why !== 'spot') this.say(COUNT.down);
     shared(L, () => {
       L.fx.stars(this.center(v1), 22, ['#ffe14a', '#fff3c0', '#ffffff']);
       L.fx.ring(v1.set(this.pos.x, c.y + 0.1, this.pos.z), 2.2, '#ffe14a', 0.4);
@@ -487,7 +598,7 @@ export class Count3 implements Boss3Like, Netted {
       L.tcam.shake(0.25);
     });
     this.airT = 0;
-    if (!L.nl) this.helperBark('tosha', HELP.tosha);
+    if (!L.nl) this.helperBark('tosha', HELP.toshaHit);
     // peas for the slingshots (every hero picks up his own)
     if ((this.knocks = (this.knocks + 1) % 2) === 0) L.dropPickup('peas', v1.set(this.pos.x, c.y + 0.6, this.pos.z).clone());
   }
@@ -559,13 +670,17 @@ export class Count3 implements Boss3Like, Netted {
     this.phase = n;
     for (let i = 0; i < Math.min(3, this.heroes()); i++) L.dropPickup('heart', this.center(v1));
     this.rise(L);
-    if (n === 2) { this.say(COUNT.p2[0], true); this.sumCd = 1.2; }
-    else {
+    if (n === 2) {
+      this.say(COUNT.p2[0], true); this.sumCd = 1.2; this.sipCd = 4;
+      shared(L, () => L.hud.toast(TOAST.sip, 7));
+    } else {
       this.say(COUNT.p3[0], true);
       this.dark = 1;
       for (const l of this.env.lanterns) if (l.lit) l.snuff();
-      shared(L, () => L.hud.toast(TOAST.dark, 7));
+      shared(L, () => L.hud.toast(TOAST.dark, 8));
       this.snuffCd = 8; this.flashCd = 3;
+      // solo: the hint from the rim (§5.6: Тоша — or whoever of the three is there)
+      if (!L.nl) { if (!this.helperBark('tosha', HELP.tosha)) this.helperBark('pastila', HELP.tosha); }
     }
     L.nl?.entEvent(this, 'phase', { n });
     this.phaseFx(n);
@@ -632,7 +747,11 @@ export class Count3 implements Boss3Like, Netted {
       const K = vamp(L);
       if (this.beaconT <= 0 && K.sunAt(L.player.center(v1)) < 0.2) {
         this.beaconT = 16;
-        if (this.helperBark('pastila', HELP.beacon)) K.light(L.player.pos.clone().add(v2.set(rand(-1, 1), 0, rand(-1, 1))), { r: 5.5, secs: 9 });
+        if (this.helperBark('pastila', HELP.beacon)) {
+          const at = L.player.pos.clone().add(v2.set(rand(-1, 1), 0, rand(-1, 1)));
+          K.light(at, { r: 5.5, secs: 9 });
+          this.trySpot(L, at);
+        }
       }
     }
   }
@@ -693,7 +812,13 @@ export class Count3 implements Boss3Like, Netted {
     a.talk = Math.max(0, a.talk - dt * 3);
     // his eyes glow in the dark (fair: you can follow him) and before a swoop
     a.glow = Math.max(this.darkK * 0.9, this.state === 'tele' ? 1 : 0, 0.25);
+    // v2: the monocle glints first thing in a swoop's telegraph; it gleams in the dark and in the spotlight
+    const tk = this.state === 'tele' ? clamp(this.st / 0.45, 0, 1) : 1;
+    a.glint = Math.max(this.state === 'tele' ? Math.sin(tk * Math.PI) : 0, this.state === 'pose' ? 0.8 : 0, this.darkK * (0.3 + 0.15 * Math.sin(this.t * 3)));
+    // the lining: a new patch of drunk colour after each phase
+    if (!this.manual) this.rig.lining(2 + this.phase);
     this.rig.update(dt, a);
+    this.sipFx(L, dt);
     const c = this.env.c;
     this.blob.position.set(this.pos.x, c.y + 0.04, this.pos.z);
     this.blob.visible = this.active && !this.dead && Math.hypot(this.pos.x - c.x, this.pos.z - c.z) < this.env.R + 1;
@@ -738,7 +863,52 @@ export class Count3 implements Boss3Like, Netted {
   }
 
   /** the scene takes him over: no telegraphs on the floor */
-  lanesOff() { this.lane.hide(); this.dropMark.hide(); }
+  lanesOff() { this.lane.hide(); this.dropMark.hide(); this.beam.visible = false; }
+
+  /** every machine: the sip's ribbon, the pose's beam, a dark lantern near him twinkling (phase 3) */
+  private sipFx(L: Level3D, dt: number) {
+    const ls = this.env.lanterns;
+    const nearest = (lit: boolean, max: number) => {
+      let best: Lantern | null = null, bd = max;
+      for (const l of ls) { if (l.lit !== lit) continue; const d = Math.hypot(l.pos.x - this.pos.x, l.pos.z - this.pos.z); if (d < bd) { bd = d; best = l; } }
+      return best;
+    };
+    this.sparkT -= dt;
+    const mouth = this.rig.monocle.getWorldPosition(v1).add(v2.set(0, -0.22, 0));
+    if (this.state === 'sip' && !this.manual) {
+      const l = nearest(true, 3);
+      if (l && this.sparkT <= 0) {
+        this.sparkT = 0.04;
+        // a pink ribbon of colour flowing up the straw
+        const a = l.head, k = (this.t * 1.7) % 1;
+        for (let i = 0; i < 3; i++) {
+          const q = (k + i / 3) % 1;
+          const p = a.clone().lerp(mouth, q); p.y += Math.sin(q * Math.PI) * 0.35;
+          L.fx.emit(p, { count: 1, speed: [0.05, 0.2], life: [0.18, 0.3], size: [0.08, 0.14], colors: ['#ff4a8a', '#ff9ac0', '#ffd34a'], drag: 4 });
+        }
+      }
+    }
+    // «Софиты»: the beam from the lantern to him
+    let showBeam = false;
+    if (this.state === 'pose') {
+      const l = nearest(true, SPOT_R + 3);
+      if (l) {
+        showBeam = true;
+        const from = l.head, to = this.center(v2);
+        const len = from.distanceTo(to);
+        this.beam.position.copy(from);
+        this.beam.quaternion.setFromUnitVectors(UP, to.clone().sub(from).normalize());
+        this.beam.scale.set(1, len, 1);
+        (this.beam.material as THREE.MeshBasicMaterial).opacity = 0.32 + 0.08 * Math.sin(this.t * 18);
+      }
+    }
+    this.beam.visible = showBeam;
+    // phase 3, in the dark: a dark lantern under him twinkles gold (light it now!)
+    if (this.phase === 3 && this.darkK > 0.5 && this.airborne && this.state !== 'pose' && this.sparkT <= 0) {
+      const l = nearest(false, SPOT_R);
+      if (l) { this.sparkT = 0.12; L.fx.glow.emit(l.head.clone().add(v2.set(rand(-0.3, 0.3), rand(-0.2, 0.3), rand(-0.3, 0.3))), { count: 1, speed: [0.2, 0.6], life: [0.5, 0.9], size: [0.12, 0.22], colors: ['#ffe14a', '#fff3c0'], g: -0.6 }); }
+    }
+  }
 
   // ═════════════════════════════ Boss3Like ═════════════════════════════
   faceTarget() { return this.center(); }

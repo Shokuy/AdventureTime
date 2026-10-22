@@ -49,60 +49,120 @@ function gather(L: Level3D, x: number, z: number, r: number, a0: number) {
 const toastKey = (s: string) => s.replace('[E]', glyphLabel('interact'));
 
 const scripts: Record<string, ScriptFn> = {
-  // ───────────── 7.1 fangs3_intro — Сад прабабушки Карамели ─────────────
+  // ───────────── 7.0 fangs3_cold — Лейка (cold open, before the banner) ─────────────
+  *fangs3_cold(L) {
+    const g = G(L), can = g.can;
+    L.cutscene(true);
+    g.cast.show(false);
+    audio.stopMusic(0.3);
+    const bed = COURT_BED, top = 0.6;
+    // the can hangs in the air by itself, a metre over the grey bed by mirror 1, its rose over the flowers
+    const hang = V(bed.x + 1.4, top + 1.0, bed.z + 1.4);
+    can.lying = false; can.root.visible = true; can.tilt = 0; can.pour = 0;
+    can.root.position.copy(hang); can.root.rotation.set(0, Math.atan2(bed.x - hang.x, bed.z - hang.z), 0);
+    // a music box, slowly, note by note
+    const tune = [1, 1.26, 1.5, 1.26, 1.12, 1, 0.84, 1, 1.12, 0.94];
+    let playing = true;
+    const box = (i: number) => { if (!playing) return; audio.sfx('menuMove', { pitch: tune[i % tune.length] * 0.8, volume: 0.45 }); g.after(0.55, () => box(i + 1)); };
+    box(0);
+    ambient(L, () => audio.sfx('mist', { pitch: 0.7, volume: 0.5 }));
+    try {
+      // К1 the glass arches, grey flowers
+      yield L.shot(V(8.5, 4.4, 51.5), V(bed.x, 1.2, bed.z), 0);
+      yield L.shot(V(5.5, 3.4, 47), V(bed.x, 1.3, bed.z), 2.2);
+      // К2 the can waters a grey flower; the flower shivers and greys even more
+      yield L.shot(V(bed.x + 4.1, 2.2, bed.z + 4.2), V(bed.x + 0.9, 1.3, bed.z + 0.9), 0);
+      can.tilt = 0.8; can.pour = 1;
+      const drip = () => ambient(L, () => { L.fx.emit(V(bed.x + 0.9, top + 0.4, bed.z + 0.9), { count: 6, speed: [0.3, 1.2], life: [0.5, 1], size: [0.15, 0.3], size2: 1.6, colors: ['#8a8a96', '#b8b8c4', '#6a6a78'], g: -0.6, drag: 2 }); });
+      drip(); g.after(0.8, drip); g.after(1.8, drip); g.after(2.8, drip);
+      ambient(L, () => audio.sfx('drain', { pitch: 1.3, volume: 0.5 }));
+      yield say(L, 'shepot', '…пей… пей, маленький… ну почему ты опять серый…', 'sad');
+      // К3 the can freezes; far off, a door creaks
+      can.tilt = 0; can.pour = 0;
+      ambient(L, () => audio.sfx('door', { pitch: 0.55, volume: 0.6 }));
+      yield L.shot(V(bed.x - 3.3, 1.9, bed.z + 5.2), hang.clone().setY(hang.y + 0.4), 0);
+      g.whispers.say(hang.clone(), '…гости…', 2.8);
+      yield say(L, 'shepot', '…гости… тёплые… цветные… ш-ш-ш…', 'scared');
+      // К4 it drops and rolls; nobody's there
+      playing = false;
+      yield L.shot(V(CAN_DROPPED.x + 2.1, 0.55, CAN_DROPPED.z + 2.6), CAN_DROPPED.clone().setY(0.3), 0);
+      const from = hang.clone(), mid = V(bed.x + 2.0, 0, bed.z + 2.0);
+      yield tween(0.45, (k) => { can.root.position.lerpVectors(from, mid, k); can.root.position.y = from.y * (1 - k * k); can.root.rotation.z = k * 1.2; }, (k) => k);
+      ambient(L, () => { audio.sfx('clang', { pitch: 0.9, volume: 0.7 }); L.fx.emit(mid.clone().setY(0.2), { count: 8, speed: [0.5, 1.5], life: [0.3, 0.6], size: [0.1, 0.2], size2: 1.5, colors: ['#c8c4d8', '#8a86a0'], g: 2, drag: 2 }); });
+      can.lying = true;
+      yield tween(0.9, (k) => { can.root.position.lerpVectors(mid, CAN_DROPPED, ease.outCubic(k)); can.root.rotation.y = 0.8 * k; }, (k) => k);
+      yield wait(1.2);
+    } finally {
+      playing = false;
+      g.dropCan();
+    }
+    if (L.authority) L.runGen((function* (): Script { yield wait(0.05); L.run('fangs3_intro'); })());
+    yield wait(0.1);
+  },
+
+  // ───────────── 7.1 fangs3_intro — Эхо ─────────────
   *fangs3_intro(L) {
     const g = G(L), c = g.cast;
     stageOn(L);
-    marks(c, MARKS.intro);
+    marks(L, c, MARKS.intro);
+    audio.playMusic('garden');
     L.hud.showBanner(BANNER, '#d8c8ff');
-    // into the garden, toward the big dome far away
+    // К1 into the garden, toward the big dome far away
     yield L.shot(V(5, 7, 72), V(-1, 3.5, 20), 0);
     yield all(L.shot(V(2.4, 4.6, 66), V(0, 4.5, 10), 3.2), say(L, 'narrator', 'Третья ночь. Луна — как спелая вишня. Отряд вошёл в Стеклянную оранжерею.'));
+    // К2 Пастила with the diary
     c.expr('pastila', 'sad');
     yield face(L, c, 'pastila', 2.5, 0.6);
-    yield say(L, 'pastila', 'Её построила моя прапрабабушка Карамель. Тут росли все растения Хрумляндии.', 'sad');
+    yield say(L, 'pastila', 'Прабабушка Карамель построила её. Тут росли все растения Хрумляндии.', 'sad');
     c.expr('pastila', 'normal');
-    yield face(L, c, 'tosha', 2.5, -0.5);
-    yield say(L, 'tosha', 'А теперь тут пусто. И всё стеклянное. И трескается.');
-    // someone whispers right behind Бублик's ear — nobody there
+    yield say(L, 'pastila', 'У меня её дневник. «Опыт номер один: сад, где всегда полдень».');
+    // (Тоша answers: the two of them)
+    yield two(L, c, 'pastila', 'tosha');
+    yield say(L, 'tosha', 'А теперь тут пусто. И всё трескается.');
+    // К3 Бублик, a whisper right behind his ear — nobody there
     c.expr('bublik', 'scared');
     yield face(L, c, 'bublik', 2.0, 0.3, 0.1);
     yield say(L, 'bublik', 'Тоша, кто-то шепчет. Прямо у меня за ухом.', 'scared');
     const ear = c.pos('bublik').clone().add(V(0.6, 0.6, 0.8));
-    g.whispers.say(ear, '…ш-ш-ш…', 3.5);
+    g.whispers.say(ear, '…за ухом…', 3.5);
     yield L.shot(c.pos('bublik').clone().add(V(-0.6, 1.0, -2.0)), ear, 0.6);
-    yield say(L, 'shepot', '…ш-ш-ш… гости… тёплые… цветные… ш-ш-ш…');
+    yield say(L, 'shepot', '…за ухом… за ухом… ш-ш-ш…');
+    // К4 Ноки and Бублик
     c.expr('bublik', 'normal');
-    c.look('noki', ear);
-    yield face(L, c, 'noki', 2.4, -0.6);
-    yield say(L, 'noki', 'Шёпот. Он рядом. Он всегда рядом.');
-    c.look('noki', null);
-    yield L.shot(V(1, 2.6, 53.2), V(0.8, 1.2, 59), 0.8);
-    yield say(L, 'pastila', 'Корень полуденника — в центре, под большим куполом. Но он цветёт только в полдень.');
-    yield say(L, 'bublik', 'А сейчас полночь. Подождём двенадцать часов?');
-    yield face(L, c, 'noki', 2.4, -0.6);
-    yield say(L, 'noki', 'У нас нет двенадцати часов. У нас две ночи.');
-    yield face(L, c, 'pastila', 2.6, 0.7);
-    yield say(L, 'pastila', 'Тогда сделаем полдень. Зеркала сада ловят свет. Направим их на купол — и будет солнце!');
+    c.look('noki', c.pos('bublik'));
+    yield two(L, c, 'noki', 'bublik');
+    yield say(L, 'noki', 'Шёпот. Он повторяет за вами. Не болтайте лишнего.');
+    c.expr('bublik', 'happy');
+    yield say(L, 'bublik', 'Я молчу. Совсем. Это я молча говорю.', 'happy');
+    g.whispers.say(ear, '…молча…', 3);
+    yield say(L, 'shepot', '…молча… молча…');
+    c.look('noki', null); c.expr('bublik', 'normal');
+    // К5 the mirrors on their stands (over Пастила's shoulder, into the court: mirror 1 is there)
+    const pp = c.pos('pastila');
+    yield L.shot(V(pp.x + 0.9, 2.1, pp.z + 2.4), V(-6.5, 1.6, 44.5), 0.8);
+    yield say(L, 'pastila', 'Корень полуденника — под куполом. Он цветёт только в полдень.');
+    c.pose('pastila', 'cheer', 'happy');
+    yield say(L, 'pastila', 'Значит, сделаем полдень! Зеркала ловят свет. Повернём их на купол!', 'happy');
+    c.pose('pastila', 'idle', 'happy');
+    // К6 Тоша and Пастила
     c.pose('tosha', 'cheer', 'happy');
-    yield face(L, c, 'tosha', 2.6, -0.4);
+    yield two(L, c, 'tosha', 'pastila');
     yield say(L, 'tosha', 'Солнце посреди ночи? Это по-нашему!', 'happy');
     c.pose('tosha', 'idle');
-    yield L.shot(V(1, 2.6, 53.2), V(0.8, 1.2, 59), 0.6);
-    yield say(L, 'pastila', 'Помните: невидимку видно в зеркалах, на пыльце и в свете маяка.');
+    for (const k of CAST) c.expr(k, 'normal');
     stageOff(L);
     yield L.camBack(0.7);
     L.cutscene(false);
-    L.hud.showChapter(L.def.title, L.def.subtitle);
+    L.hud.showChapter(L.def.title, `${L.def.subtitle} · ${NIGHT}`);
     L.bannerShown = true;
     L.hud.toast(TOAST.intro, 7);
   },
 
-  // ───────────── 7.2.1 fangs3_mirror — the first mirror: the grey bed blooms ─────────────
+  // ───────────── 7.2.1 fangs3_mirror — the first mirror: the grey bed blooms (as v1) ─────────────
   *fangs3_mirror(L) {
     const g = G(L), c = g.cast;
     stageOn(L);
-    marks(c, MARKS.mirror);
+    marks(L, c, MARKS.mirror);
     for (const k of CAST) c.look(k, V(-3.5, 1, 37));
     yield L.shot(V(-1.2, 3.2, 43.5), V(-3.6, 0.8, 37), 0);
     yield wait(0.9);
@@ -117,39 +177,72 @@ const scripts: Record<string, ScriptFn> = {
     L.hud.toast(toastKey(TOAST.mirror), 6);
   },
 
-  // ───────────── 7.3 fangs3_boss_intro — Искусственный полдень ─────────────
+  // ───────────── 7.3 fangs3_boss_intro — Все зеркала ─────────────
   *fangs3_boss_intro(L) {
     const g = G(L), c = g.cast, b = g.boss!;
     const C = ARENA.c;
     stageOn(L);
-    marks(c, MARKS.bed);
-    audio.playMusic('tension');
+    ringMarks(L, c);
     for (const k of CAST) c.look(k, V(C.x, 1, C.z));
-    // the bud between three beams, the light of a made noon
-    yield L.shot(V(C.x + 4.5, 2.6, C.z + 5.5), g.bud.top, 0);
-    g.bud.open = 0.5;
-    yield wait(0.6);
-    c.pose('pastila', 'cheer', 'happy');
-    yield all(L.shot(V(C.x + 3, 2.0, C.z + 3.4), g.bud.top, 1.2), say(L, 'pastila', 'Полдень! Искусственный, но настоящий. Корень раскрывается!', 'happy'));
-    c.pose('pastila', 'idle', 'surprised');
-    // the light blinks — something invisible in the beam
-    for (let i = 0; i < 3; i++) { g.bud.open = 0.1; L.whiteFlash = 0.15; yield wait(0.18); g.bud.open = 0.5; yield wait(0.22); }
-    yield L.shot(V(C.x - 5, 3.0, C.z - 1), V(C.x + 2, 1.6, C.z - 6), 0.8);
-    g.whispers.say(V(C.x + 3, 1.6, C.z - 7), '…НЕТ…', 3);
-    yield say(L, 'shepot', '…НЕТ… ш-ш-ш… свет… больно… гасите…', 'angry');
-    c.expr('tosha', 'angry');
-    yield face(L, c, 'tosha', 2.6, -0.5);
-    yield say(L, 'tosha', 'Покажись! Нечестно драться невидимкой!', 'angry');
-    g.whispers.say(V(C.x - 6, 1.6, C.z + 2), '…честно?..', 3);
-    yield L.shot(V(C.x + 1, 2.2, C.z + 9), V(C.x - 6, 1.6, C.z + 2), 0.7);
-    yield say(L, 'shepot', '…честно?.. сто лет я никому не показывался… я забыл, какой я…');
-    yield face(L, c, 'noki', 2.4, -0.6);
-    yield say(L, 'noki', 'Он прятался так долго, что исчез совсем. Аккорд его проявит.');
-    yield face(L, c, 'pastila', 2.4, 0.6);
-    yield say(L, 'pastila', 'А маяк подержит видимым. Не дайте ему погасить зеркала!');
-    g.whispers.say(V(C.x + 7, 1.6, C.z + 3), '…ш-ш-ш…', 3);
-    yield L.shot(V(C.x, 6, C.z + 13), V(C.x, 1, C.z - 4), 1.0);
-    yield say(L, 'shepot', '…ш-ш-ш… тогда я заберу ваши цвета… и вас тоже никто не увидит…');
+    try {
+      // К1 from above: the four round the bed in the light of a made noon
+      g.bud.open = 0.5;
+      yield L.shot(V(C.x + 1.5, 13, C.z + 6.5), V(C.x, 0.5, C.z), 0);
+      c.pose('pastila', 'cheer', 'happy');
+      yield all(L.shot(V(C.x + 1.2, 11, C.z + 5.4), V(C.x, 0.5, C.z), 2.4), say(L, 'pastila', 'Полдень! Искусственный, но настоящий. Корень раскрывается!', 'happy'));
+      c.pose('pastila', 'idle', 'surprised');
+      // К2 the bud
+      yield L.shot(V(C.x + 2.2, 1.9, C.z + 2.6), g.bud.top, 0);
+      yield wait(0.8);
+      // К3 the light blinks — and every mirror shows a skinny eared figure right behind each of the four
+      audio.stopMusic(0.2);
+      for (let i = 0; i < 3; i++) { g.bud.open = 0.1; L.whiteFlash = 0.15; yield wait(0.16); g.bud.open = 0.5; yield wait(0.2); }
+      g.sceneGhosts = CAST.map((k) => {
+        const p = c.pos(k), out = V(p.x - C.x, 0, p.z - C.z).normalize();
+        return { kind: 'boss' as const, pos: p.clone().addScaledVector(out, 0.9), h: 2.2 };
+      });
+      ambient(L, () => { audio.sfx('hiss', { pitch: 1.6, volume: 0.6 }); audio.sfx('reflect', { pitch: 0.6, volume: 0.7 }); });
+      // (a wide shot from the bed out toward the mirrors of the north-west wall, the four in front of them)
+      yield L.shot(V(C.x + 3.2, 2.6, C.z + 8.5), V(C.x - 5, 2.0, C.z - 9), 0);
+      c.expr('bublik', 'scared');
+      yield say(L, 'bublik', 'Он… за каждым из нас. Сразу.', 'scared');
+      // К4 they spin round — nobody behind them
+      g.sceneGhosts = null;
+      for (const k of CAST) { const p = c.pos(k); c.look(k, V(p.x * 2 - C.x, 1, p.z * 2 - C.z)); c.expr(k, 'scared'); }
+      yield L.shot(V(C.x, 3.6, C.z + 1.0), V(C.x, 0.8, C.z + 5), 0);
+      g.whispers.say(V(C.x + 3, 1.6, C.z - 7), '…НЕТ…', 3);
+      ambient(L, () => audio.sfx('hiss', { pitch: 0.9 }));
+      yield say(L, 'shepot', '…НЕТ… свет… больно… гасите…', 'angry');
+      for (const k of CAST) { c.look(k, V(C.x, 1, C.z)); c.expr(k, 'normal'); }
+      c.expr('tosha', 'angry');
+      yield face(L, c, 'tosha', 2.6, -0.5);
+      yield say(L, 'tosha', 'Покажись! Нечестно — невидимкой!', 'angry');
+      g.whispers.say(V(C.x - 6, 1.6, C.z + 2), '…честно?..', 3);
+      yield say(L, 'shepot', '…честно?.. сто лет я никому не показывался… я забыл, какой я…');
+      c.expr('tosha', 'normal');
+      // К5 Пастила with the diary
+      yield face(L, c, 'pastila', 2.4, 0.6);
+      yield say(L, 'pastila', 'Прабабушка писала про ученика. Ушастый, говорил с цветами… Шуршик?');
+      g.whispers.say(V(C.x + 5, 1.6, C.z - 4), '…не называй…', 3);
+      yield say(L, 'shepot', '…не называй… не смотри… это не я…', 'scared');
+      // К6 over Ноки's shoulder onto the empty air over the bed
+      const np = c.pos('noki');
+      const toBed = V(C.x - np.x, 0, C.z - np.z).normalize();
+      yield L.shot(np.clone().addScaledVector(toBed, -1.6).add(V(-toBed.z * 0.6, 1.9, toBed.x * 0.6)), V(C.x, 1.6, C.z), 0.6);
+      yield say(L, 'noki', 'Аккорд его проявит. Пастила, держи маяк.');
+      // К7 Пастила raises the beacon — her hands shake
+      c.expr('pastila', 'scared');
+      c.anim('pastila').attack = { kind: 'syringe', p: 0.5 };
+      yield face(L, c, 'pastila', 2.2, 0.4);
+      yield say(L, 'pastila', 'Держу. Не дрожит. Это свет дрожит.', 'scared');
+      c.anim('pastila').attack = null;
+      audio.playMusic('vampire_boss');
+      g.whispers.say(V(C.x + 7, 1.6, C.z + 3), '…ш-ш-ш…', 3);
+      yield L.shot(V(C.x, 6, C.z + 13), V(C.x, 1, C.z - 4), 1.0);
+      yield say(L, 'shepot', '…тогда я заберу ваши цвета… и вас тоже никто не увидит…');
+    } finally {
+      g.sceneGhosts = null;
+    }
     // the fight
     for (const k of CAST) { c.look(k, null); c.expr(k, 'normal'); }
     g.fight = true;
@@ -180,7 +273,7 @@ const scripts: Record<string, ScriptFn> = {
     if (L.authority) b.start();
   },
 
-  // ───────────── 7.5 fangs3_boss_defeat — Каким был Шёпот ─────────────
+  // ───────────── 7.5 fangs3_boss_defeat — Шуршик и страница ─────────────
   *fangs3_boss_defeat(L) {
     const g = G(L), c = g.cast, b = g.boss!;
     const C = ARENA.c;
@@ -190,107 +283,159 @@ const scripts: Record<string, ScriptFn> = {
     g.won = true;
     L.hud.bossMax = 0;
     audio.stopMusic(1.2);
-    marks(c, MARKS.bed);
-    // in the beacon's light he stays visible for good: a little, skinny, eared vampire in a huge cloak
+    marks(L, c, MARKS.bed);
+    // he shows for good: a little, skinny, eared vampire in Карамель's huge apron, sitting on the bed, face in his paws
     const seat = V(C.x, 0.7, C.z + 2.35);
     b.pos.copy(seat); b.yaw = 0; b.visGoal = 1; b.vis = 1;
     b.anim.small = 1; b.anim.hide = 1;
     shepotSeen(L, true);
     for (const k of CAST) c.look(k, seat);
-    g.V.light(V(C.x - 3.4, 0, C.z + 1.2), { r: 4.5, secs: 16 });
-    // a low shot, at his height
-    yield L.shot(V(C.x + 0.4, 1.0, C.z + 5.6), seat.clone().setY(1.2), 0);
-    yield wait(0.5);
-    yield say(L, 'shepot', '…не смотрите на меня… я страшный…', 'scared');
-    c.expr('bublik', 'surprised');
-    yield face(L, c, 'bublik', 1.8, 0.4, 0.05);
-    yield say(L, 'bublik', 'Ты… маленький. И ушастый. Как я!', 'surprised');
-    c.expr('bublik', 'happy');
-    yield L.shot(V(C.x - 0.6, 1.1, C.z + 4.9), seat.clone().setY(1.25), 0.6);
-    b.anim.hide = 0.3;
-    yield say(L, 'shepot', '…правда?.. сто лет меня никто не видел… а я, оказывается… ушастый…', 'sad');
-    // пуф — a little bat; it flies up, looks back
-    b.anim.hide = 0;
-    ambient(L, () => {
-      L.fx.emit(seat.clone().setY(1.2), { count: 30, speed: [1, 4], dir: V(0, 1, 0), spread: 0.9, life: [0.5, 1.1], size: [0.2, 0.42], size2: 1.8, colors: ['#4a3a66', '#2b2140', '#8a7ab0'], g: -1, drag: 2 });
-      L.fx.stars(seat.clone().setY(1.2), 12, ['#ffe14a', '#ffffff']);
-      audio.sfx('batScreech', { pitch: 1.8, volume: 0.35 });
-    });
-    b.gone = true; b.active = false;
-    const bat = createBat();
-    const br = new THREE.Group(); br.add(bat.root); br.scale.setScalar(0.7); br.position.copy(seat).setY(1.3);
-    L.scene.add(br);
-    const fly = (k: number) => { br.position.y = 1.3 + k * 1.6; br.rotation.y = Math.PI; bat.update(0.016, { st: 'fly', p: 0, speed: 0, flash: 0 }); };
-    yield tween(0.8, fly, ease.outCubic);
-    br.rotation.y = 0;
-    yield L.shot(V(C.x + 0.2, 2.6, C.z + 4.6), br.position, 0.4);
-    yield say(L, 'shepot', '…пи… спасибо, что посмотрели… пи…');
-    // off to the castle; colour flows back over the garden, the crystal rings
-    const from = br.position.clone(), to = V(C.x + 60, 30, C.z - 120);
-    yield all(L.shot(V(C.x, 3, C.z + 8), V(C.x + 6, 6, C.z - 10), 1.6), tween(1.8, (k) => { br.position.lerpVectors(from, to, k); br.rotation.y = Math.atan2(to.x - from.x, to.z - from.z); bat.update(0.016, { st: 'fly', p: 0, speed: 0, flash: 0 }); br.scale.setScalar(0.7 * (1 - k * 0.7)); }));
-    L.scene.remove(br);
-    if (L.authority) { g.V.restoreZone('dome'); g.V.restoreZone('wing'); g.V.restoreZone('court'); }
-    ambient(L, () => { audio.sfx('colorRestore', { pitch: 0.7 }); audio.sfx('reflect', { pitch: 0.6, volume: 0.8 }); L.fx.ring(C.clone().setY(0.3), 19, '#ffe9a0', 1.2); });
-    yield L.shot(V(C.x - 9, 5, C.z + 12), V(C.x, 3, C.z - 4), 1.4);
-    yield wait(1.0);
-    shepotSeen(L, false);
+    g.V.light(V(C.x - 3.4, 0, C.z + 1.2), { r: 4.5, secs: 20 });
+    let mouseG: THREE.Group | null = null;
+    try {
+      // К1 a low shot, at his height
+      yield L.shot(V(C.x + 0.4, 1.0, C.z + 5.6), seat.clone().setY(1.2), 0);
+      yield wait(0.5);
+      yield say(L, 'shepot', '…не смотрите… я страшный…', 'scared');
+      // К2 Бублик crouches next to him (0.8 m)
+      c.place('bublik', ...placeAt(L, V(C.x + 0.35, 0, C.z + 3.2), 'bublik'), Math.PI + 0.3);
+      c.look('bublik', seat);
+      c.expr('bublik', 'surprised');
+      yield L.shot(V(C.x + 2.3, 1.15, C.z + 4.3), V(C.x + 0.15, 0.95, C.z + 2.75), 0);
+      yield say(L, 'bublik', 'Ты маленький. И ушастый. Как я!', 'surprised');
+      c.expr('bublik', 'happy');
+      b.anim.hide = 0.3;
+      yield say(L, 'shepot', '…правда?.. меня в посаде дразнили за уши… я попросил, чтобы меня не видели…', 'sad');
+      // К3 Пастила with the diary
+      c.expr('pastila', 'sad');
+      yield face(L, c, 'pastila', 2.4, 0.5);
+      yield say(L, 'pastila', 'Прабабушка тебя искала, Шуршик. Всю жизнь. В дневнике — каждый год.', 'sad');
+      c.expr('pastila', 'normal');
+      // К4 out of the apron: a folded yellowed page (from here his name in the box is «Шуршик»)
+      L.seen.add(NAMED);
+      b.anim.hide = 0;
+      b.rig.page.visible = true;
+      yield L.shot(V(C.x - 0.5, 1.15, C.z + 3.9), seat.clone().setY(1.05), 0);
+      ambient(L, () => audio.sfx('artifact', { pitch: 0.8, volume: 0.6 }));
+      yield say(L, 'shepot', '…она велела отдать… девочке с гитарой… а я стеснялся… сто лет…', 'sad');
+      // К5 Ноки and Шуршик
+      c.expr('noki', 'surprised');
+      yield c.walk('noki', C.x - 0.9, C.z + 3.5, 2.6, 2.5);
+      c.look('noki', seat);
+      yield L.shot(V(C.x + 1.9, 1.5, C.z + 5.4), V(C.x - 0.4, 1.0, C.z + 2.9), 0);
+      yield say(L, 'noki', 'Мне?', 'surprised');
+      b.rig.page.visible = false;
+      yield showCard(L, 'page');
+      c.expr('noki', 'normal');
+      yield say(L, 'shepot', '…спасибо, что посмотрели… пи…');
+      // К6 пуф — a little eared mouse looks round and waves; a wave of colour, the crystal rings
+      ambient(L, () => {
+        L.fx.emit(seat.clone().setY(1.0), { count: 30, speed: [1, 4], dir: V(0, 1, 0), spread: 0.9, life: [0.5, 1.1], size: [0.2, 0.42], size2: 1.8, colors: ['#4a3a66', '#2b2140', '#8a7ab0'], g: -1, drag: 2 });
+        L.fx.stars(seat.clone().setY(1.0), 12, ['#ffe14a', '#ffffff']);
+        audio.sfx('batScreech', { pitch: 1.9, volume: 0.3 });
+      });
+      b.gone = true; b.active = false;
+      const mouse = createMouse('shepot');
+      const mg = new THREE.Group(); mg.add(mouse.root); mg.scale.setScalar(1.7); mg.position.copy(seat); mg.position.y = 0.72;
+      L.scene.add(mg); mouseG = mg;
+      const ma: MouseAnim = { talk: 0, hop: 0, squeak: 0 };
+      const look = (k: number) => { mg.rotation.y = Math.sin(k * Math.PI * 3) * 0.9; ma.hop = Math.max(0, Math.sin(k * Math.PI * 4)); ma.squeak = k > 0.6 ? 1 : 0; mouse.update(0.016, ma); };
+      yield all(L.shot(V(C.x - 2.6, 2.4, C.z + 7.8), seat.clone().setY(0.9), 0.5), tween(1.6, look));
+      if (L.authority) { g.V.restoreZone('dome'); g.V.restoreZone('wing'); g.V.restoreZone('court'); }
+      ambient(L, () => { audio.sfx('colorRestore', { pitch: 0.7 }); audio.sfx('reflect', { pitch: 0.6, volume: 0.8 }); L.fx.ring(C.clone().setY(0.3), 19, '#ffe9a0', 1.2); });
+      const m0 = mg.position.clone(), m1 = V(C.x + 3.5, 0, C.z + 1.5);
+      yield all(L.shot(V(C.x - 9, 5, C.z + 12), V(C.x, 3, C.z - 4), 1.4), tween(1.4, (k) => { mg.position.lerpVectors(m0, m1, k); mg.position.y = 0.72 * (1 - k) + Math.abs(Math.sin(k * Math.PI * 5)) * 0.25; mg.rotation.y = Math.atan2(m1.x - m0.x, m1.z - m0.z); ma.hop = 1; mouse.update(0.016, ma); mg.scale.setScalar(1.7 * (1 - k * 0.8)); }));
+      yield wait(0.6);
+    } finally {
+      mouseG?.removeFromParent();
+      b.gone = true; b.active = false;
+      b.rig.page.visible = false;
+      shepotSeen(L, false);
+    }
     if (L.authority) L.runGen((function* (): Script { yield wait(0.05); L.run('fangs3_ending'); })());
     yield wait(0.1);
   },
 
-  // ───────────── 7.6 fangs3_ending — Корень полуденника ─────────────
+  // ───────────── 7.6 fangs3_ending — Король в зеркале ─────────────
   *fangs3_ending(L) {
-    const g = G(L), c = g.cast;
+    const g = G(L), c = g.cast, km = g.kingMirror;
     const C = ARENA.c;
     stageOn(L);
-    marks(c, MARKS.bed);
-    c.place('pastila', C.x + 0.5, 0, C.z + 3.0, Math.PI);
+    marks(L, c, MARKS.bed);
+    c.place('pastila', ...placeAt(L, V(C.x + 0.5, 0, C.z + 3.0), 'pastila', 0.6), Math.PI);
     for (const k of CAST) c.look(k, V(C.x, 1, C.z));
     g.bud.open = 1;
     audio.playMusic('garden');
-    yield L.shot(V(C.x + 2.4, 2.2, C.z + 4.8), g.bud.top, 0.9);
-    c.pose('pastila', 'cheer', 'happy');
-    yield say(L, 'pastila', 'Корень полуденника! Тёплый, как сковородка. Аккуратно, не уроните!', 'happy');
-    c.pose('pastila', 'idle', 'happy');
-    yield showCard(L);
-    yield face(L, c, 'bublik', 2.0, 0.4, 0.05);
-    yield say(L, 'bublik', 'Пахнет летним полднем. С пирожками.');
-    g.bud.open = 0.6; // the made noon fades
-    yield face(L, c, 'pastila', 2.4, 0.5);
-    yield say(L, 'pastila', 'Прабабушка вывела его, чтобы зимой было солнце. А пригодился против луны.');
-    c.pose('tosha', 'cheer', 'happy');
-    yield face(L, c, 'tosha', 2.4, -0.5);
-    yield say(L, 'tosha', 'Две колбы! Осталась одна!', 'happy');
-    c.pose('tosha', 'idle');
-    yield face(L, c, 'pastila', 2.4, 0.5);
-    yield say(L, 'pastila', 'Пыль солнечного камня. Камень стоит на Чёрном перевале. По дороге к замку.');
-    c.expr('noki', 'sad');
-    yield face(L, c, 'noki', 2.4, -0.6);
-    yield say(L, 'noki', 'По дороге к замку… Значит, скоро.', 'sad');
-    c.look('tosha', c.pos('noki'));
-    yield face(L, c, 'tosha', 2.4, -0.5);
-    yield say(L, 'tosha', 'Ноки, ты чего?');
-    c.expr('noki', 'normal');
-    yield face(L, c, 'noki', 2.4, -0.6);
-    yield say(L, 'noki', 'На перевале стерегут Сёстры Близняшки. Ночка и Тенька. Никогда не смотрят в одну сторону.');
-    c.expr('bublik', 'happy');
-    yield face(L, c, 'bublik', 2.0, 0.4, 0.05);
-    yield say(L, 'bublik', 'Это как я и мой хвост.', 'happy');
-    yield face(L, c, 'noki', 2.4, -0.6);
-    yield say(L, 'noki', 'Почти. Только хвост не кусается.', 'sly');
-    yield L.shot(V(C.x + 0.5, 2.6, C.z + 7.5), V(C.x, 1.2, C.z), 0.7);
-    yield say(L, 'pastila', 'Осталось две ночи. Луна почти алая.');
-    // the last shot: Ноки looks at the far castle
-    const castle = V(150, 20, -360);
-    c.look('noki', castle);
-    const np = c.pos('noki');
-    const dir = castle.clone().sub(np).setY(0).normalize();
-    yield L.shot(np.clone().addScaledVector(dir, -2.6).setY(1.9).add(V(-dir.z * 0.8, 0, dir.x * 0.8)), np.clone().addScaledVector(dir, 30).setY(9), 1.6);
-    yield wait(1.6);
-    for (const k of CAST) { c.look(k, null); c.expr(k, 'normal'); }
-    openExit(L);
+    const faceM = mirrorFaceMat();
+    try {
+      // К1 Пастила digs up the root
+      yield L.shot(V(C.x + 2.4, 2.2, C.z + 4.8), g.bud.top, 0.9);
+      c.pose('pastila', 'cheer', 'happy');
+      yield say(L, 'pastila', 'Корень полуденника! Тёплый, как сковородка. Не уроните!', 'happy');
+      c.pose('pastila', 'idle', 'happy');
+      yield showCard(L);
+      yield face(L, c, 'bublik', 2.0, 0.4, 0.05);
+      yield say(L, 'bublik', 'Пахнет летним полднем. С пирожками.');
+      g.bud.open = 0.6; // the made noon fades
+      // К2 Пастила and Ноки
+      c.look('pastila', c.pos('noki')); c.look('noki', c.pos('pastila'));
+      yield two(L, c, 'pastila', 'noki');
+      yield say(L, 'pastila', 'Две колбы. Ноки… ты прочитаешь страницу?');
+      yield say(L, 'noki', 'Не сейчас.');
+      // К3 the dome's mirrors go dark at once; the music breaks off
+      audio.stopMusic(0.15);
+      for (const k of CAST) c.look(k, km.pos.clone().setY(2));
+      yield L.shot(V(C.x + 6, 4.2, C.z + 9), V(C.x - 1, 2.6, C.z - 10), 0);
+      ambient(L, () => audio.sfx('snuff', { pitch: 0.5 }));
+      yield tween(0.8, (k) => { faceM.color.setScalar(1 - 0.8 * k); km.setDark(k); });
+      // К4 the big mirror: instead of a reflection, the face of Король Полночь
+      const mirrorShot = () => L.shot(V(km.pos.x + 0.6, 3.2, km.pos.z + 7.5), V(km.pos.x, 3.3, km.pos.z), 0);
+      yield mirrorShot();
+      yield tween(1.0, (k) => { km.king = k; });
+      ambient(L, () => audio.sfx('hiss', { pitch: 0.45, volume: 0.8 }));
+      yield say(L, 'polnoch', 'Ноки. Ты привела ко мне внучку Карамели. Спасибо.');
+      // К5 from the mirror (over the King's shoulder) onto the four — Ноки starts walking toward him
+      c.expr('pastila', 'scared');
+      yield L.shot(V(km.pos.x - 0.8, 3.0, km.pos.z + 0.8), V(C.x, 1.2, C.z + 3), 0);
+      const nokiTo = placeAt(L, V(km.pos.x + 0.3, 0, km.pos.z + 1.6), 'noki', 0.5);
+      const nokiGo = c.walk('noki', nokiTo[0], nokiTo[2], 2.6, 12);
+      yield say(L, 'pastila', 'Он… видит нас?', 'scared');
+      yield mirrorShot();
+      yield say(L, 'polnoch', 'Зеркала — мои окна. У тебя прабабкин нос, принцесса. Она тоже тряслась.');
+      // К6 Тоша
+      c.expr('tosha', 'angry');
+      yield face(L, c, 'tosha', 2.6, -0.5);
+      yield say(L, 'tosha', 'Мы идём за тобой! Слышишь?', 'angry');
+      yield mirrorShot();
+      yield say(L, 'polnoch', 'Слышу. Идите через перевал. Сёстры вас встретят. Стол накрыт.');
+      // К7 Ноки swings: ДЗЫНЬ — the mirror flies to pieces
+      yield nokiGo;
+      c.look('noki', km.pos.clone().setY(2));
+      c.walk('bublik', nokiTo[0] - 1.3, nokiTo[2] + 1.2, 4.5, 8);
+      yield L.shot(V(km.pos.x + 3.2, 2.0, km.pos.z + 4.6), V(km.pos.x - 0.2, 1.8, km.pos.z + 0.8), 0);
+      c.expr('noki', 'angry');
+      c.anim('noki').attack = { kind: 'chord', p: 0.5 };
+      yield wait(0.35);
+      km.shatter();
+      c.anim('noki').attack = null;
+      yield wait(0.5);
+      yield face(L, c, 'noki', 2.3, -0.6);
+      yield say(L, 'noki', 'Не слушайте его. Он всегда говорит последним.', 'angry');
+      // К8 Ноки and Бублик
+      c.expr('noki', 'normal'); c.look('bublik', c.pos('noki')); c.look('noki', c.pos('bublik'));
+      c.expr('bublik', 'happy');
+      yield two(L, c, 'bublik', 'noki');
+      yield say(L, 'bublik', 'Уже не всегда.', 'happy');
+      yield wait(0.6);
+    } finally {
+      faceM.color.setScalar(1); km.setDark(0); km.king = 0;
+      km.shatter(false);
+      for (const k of CAST) { c.look(k, null); c.expr(k, 'normal'); }
+      openExit(L);
+    }
+    audio.playMusic('garden');
     stageOff(L);
-    gather(L, C.x, C.z - 12, 3, 0); // north of the bed, facing the open door out
+    gather(L, C.x, C.z - 12, 3, 0); // north of the bed, facing the broken mirror and the open door out
     yield L.camBack(0.7);
     L.cutscene(false);
     L.hud.toast(TOAST.exit, 6);

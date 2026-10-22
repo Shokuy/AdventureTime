@@ -18,7 +18,9 @@ import { Whispers } from './whisper';
 import { Cast } from './cast';
 import { castMouths } from './speech';
 import { ARENA, type Shepot3 } from './boss';
-import { SIGNS, DEATH, WHISPERS, FOUR, HELP, TOAST } from './lines';
+import { WateringCan, Puddles } from './can';
+import { KingMirror } from './kingMirror';
+import { SIGNS, DEATH, WHISPERS, FOUR, HELP, TOAST, NOTES, NAMES, MAZE_GIRL, ECHO, TOSHA_WING, echoOf, type Bk } from './lines';
 
 /*
  * `fangs3_garden` — Серия 4 «Стеклянная оранжерея» (docs/script-fangs.md §7). The way (toward −z):
@@ -46,6 +48,34 @@ export const MARKS = {
   mirror: { tosha: [-5.6, 41.8, -2.6], bublik: [-4.5, 40.4, -2.9], pastila: [-6.6, 39.6, -2.2], noki: [-2.4, 42.6, -2.4] },
   bed: { tosha: [-2.4, -126.4, Math.PI], bublik: [-0.8, -125.9, Math.PI], pastila: [1.0, -126.1, Math.PI], noki: [2.7, -126.8, Math.PI + 0.25] },
 } as const;
+/** the court's grey bed (the cold open: the can waters it) and where the can lies after it drops */
+export const COURT_BED = V(-3.5, 0, 37);
+export const CAN_DROPPED = V(-0.9, 0, 39.6);
+/** the mirror maze: 3 m cells (8 columns from x −12, 6 rows from z −83); panels on the cell edges; the exit (a
+ *  «mirror» that is a doorway) south of cell (row 5, column 6) */
+const MAZE_H: Record<number, number[]> = { 0: [0, 1, 2, 5, 6, 7], 1: [1, 2, 4, 6], 2: [0, 2, 3, 5, 6, 7], 3: [1, 2, 4, 5, 7], 4: [0, 1, 3, 4, 6], 5: [1, 2, 3, 5, 7] };
+const MAZE_V: Record<number, number[]> = { 2: [1, 2], 3: [3, 4], 4: [1, 5], 5: [2], 6: [4, 5], 7: [1, 2] };
+const MAZE_EXIT_C = 6;
+const cellX = (c: number) => -12 + 3 * c + 1.5, cellZ = (r: number) => -83 - 3 * r - 1.5;
+/** steps to the exit from every cell (BFS from the exit cell) */
+const MAZE_DIST = (() => {
+  const d = new Map<string, number>();
+  const open = (r: number, c: number, r2: number, c2: number) => {
+    if (r2 < 0 || r2 > 5 || c2 < 0 || c2 > 7) return false;
+    if (r2 !== r) return !(MAZE_H[Math.max(r, r2)] ?? []).includes(c);
+    return !(MAZE_V[Math.max(c, c2)] ?? []).includes(r);
+  };
+  const q: [number, number][] = [[5, MAZE_EXIT_C]];
+  d.set(`5,${MAZE_EXIT_C}`, 0);
+  while (q.length) {
+    const [r, c] = q.shift()!;
+    for (const [r2, c2] of [[r + 1, c], [r - 1, c], [r, c + 1], [r, c - 1]] as [number, number][]) {
+      if (!open(r, c, r2, c2) || d.has(`${r2},${c2}`)) continue;
+      d.set(`${r2},${c2}`, d.get(`${r},${c}`)! + 1); q.push([r2, c2]);
+    }
+  }
+  return { d, open };
+})();
 
 export function fangs3Level(): Level3Def {
   return {
@@ -96,12 +126,27 @@ export class Garden implements Netted {
   private hinted = new Set<string>();
   private said = new Set<string>();
   private helpT = 6;
+  private fightT = 0;
   private helpers: ('pastila' | 'noki')[] = [];
   private lastAtk = -1;
   /** (the first second and a half everything is drawn once: shaders compile at the start, not mid-run) */
   private cullT = 1.5;
   private brokenSeen = new Set<object>();
   private exitAt = V(0, 0, -101.4);
+  /** Карамель's old watering can: the cold open's, then Шёпот's in the fight (v2 §7.0, §7.4) */
+  can: WateringCan;
+  puddles: Puddles;
+  /** the big north mirror (the King's face in the ending) */
+  kingMirror!: KingMirror;
+  /** extra things the mirrors show (the scenes: Шёпот behind each of the four in the boss intro) */
+  sceneGhosts: GhostSrc[] | null = null;
+  /** what the heroes said lately, as echoes (the decoys of phase 2 whisper them back) */
+  heard: string[] = [];
+  private echoT = 0;
+  private notesRead = new Set<string>();
+  private noteAt: { key: string; pos: THREE.Vector3 }[] = [];
+  /** the shadow girl in the maze's mirrors (where she stands behind the glass, eased) */
+  private girl = { pos: V(0, 0, -86), on: 0, flip: false };
 
   constructor(readonly L: Level3D) {
     L.refs.garden = this;
@@ -112,6 +157,10 @@ export class Garden implements Netted {
     this.feet.onStamp = (x, z) => { if (Math.hypot(x - L.player.pos.x, z - L.player.pos.z) < 6) this.four('tosha'); };
     this.whispers = new Whispers(L);
     this.refl = new Reflections(L, () => this.ghosts());
+    this.can = new WateringCan(L);
+    this.puddles = new Puddles(L);
+    if (L.seen.has('fangs3_cold')) this.dropCan();
+    this.hookBarks();
     if (L.nl) L.nl.add(this, 931);
     V3.nightLook({ red: 0.7, fog: [34, 210], moonDir: [-0.4, 0.66, -0.64], dark: 0.55 });
     V3.moon({ size: 30 });
@@ -182,6 +231,7 @@ export class Garden implements Netted {
     for (const [x, z, c] of [[-11, 40, P3.petalV], [11, 42, P3.petalM], [-10.5, 51.5, P3.petalB], [10.8, 51, P3.petalV]] as const) nightFlower(L, x, 0, z, 1.2, c, Math.abs(x * z), B);
     L.cp(7, 0, 50.5);
     L.crumbLine(-6, 0, 50, -6, 0, 40, 5);
+    this.note('court', 3.9, 51.6, -0.4);
   }
 
   private buildHall(B: Batch) {
@@ -205,6 +255,7 @@ export class Garden implements Netted {
     glassWall(L, B, -16, -24, 16, -24, 0, 9, { gaps: [[14, 18]] });
     gableRoof(L, B, -16, -24, 16, 30, 9, 4.5, { holes: [3] });
     L.cp(4.2, 0, 27.5);
+    this.note('hall', -4.2, 27.4, 0.5);
     // the catwalk's sprinkler + the carts over the pit
     this.sprinklers.push(new Sprinkler(L, 0, 0, 20, 1.15, 1.7, 0));
     this.carts.push(new SprinklerCart(L, -2.2, 0, 7.6, 2.4, 2.4, 2.4, 6.5, 0));
@@ -287,6 +338,10 @@ export class Garden implements Netted {
     planter(L, B, 10.6, 0, -50, 1.0, 1.4);
     addGrappleRing(L, 10.4, 6.4, -45);
     L.pick('nut', 13, 4.8, -45, 'nut_fangs3_wing');
+    // Шуршик's little bed by the tall planter (a note: «не трогать — он стесняется»)
+    const sb = planter(L, B, 7.6, 0, -57.8, 0.8, 0.4);
+    bedFlowers(L, 7.6, sb - 0.1, -57.8, 0.8, 7, 31, B);
+    this.note('wing', 9.4, -55.6, -0.6);
   }
 
   private buildMaze(B: Batch) {
@@ -297,9 +352,9 @@ export class Garden implements Netted {
     glassWall(L, B, -12, -111.2, 12, -111.2, 0, 8, { gaps: [[10, 14]] });
     gableRoof(L, B, -12, -111.2, 12, -80, 8, 3, { holes: [8] });
     L.cp(-7.5, 0, -81.6);
+    this.note('maze', 4.6, -81.5, 0);
     // the maze: 3 m cells (x from −12, z from −83), panels 4 m tall on the cell edges
-    const H: Record<number, number[]> = { 0: [0, 1, 2, 5, 6, 7], 1: [1, 2, 4, 6], 2: [0, 2, 3, 5, 6, 7], 3: [1, 2, 4, 5, 7], 4: [0, 1, 3, 4, 6], 5: [1, 2, 3, 5, 7] };
-    const Vw: Record<number, number[]> = { 2: [1, 2], 3: [3, 4], 4: [1, 5], 5: [2], 6: [4, 5], 7: [1, 2] };
+    const H = MAZE_H, Vw = MAZE_V;
     const ph = 4;
     for (const [r, cs] of Object.entries(H)) for (const c of cs) {
       const p = mirrorPanel(L, B, -12 + 3 * c + 1.5, 0, -83 - 3 * Number(r), 3, ph, V(0, 0, 1));
@@ -311,7 +366,7 @@ export class Garden implements Netted {
     }
     // the far wall: eight mirrors, one of them a doorway (the way out shows in the other mirrors)
     for (let c = 0; c < 8; c++) {
-      const fake = c === 6;
+      const fake = c === MAZE_EXIT_C;
       const p = mirrorPanel(L, B, -12 + 3 * c + 1.5, 0, -101.3, 3, ph + 1, V(0, 0, 1), { fake });
       this.refl.add(p);
       if (!fake) this.refl.add(backOf(p));
@@ -379,8 +434,11 @@ export class Garden implements Netted {
       const x = c.x + Math.sin(a) * 17.2, z = c.z + Math.cos(a) * 17.2;
       slab(L, B, x - 1.1, z - 1.1, x + 1.1, z + 1.1, 2.4, 2.4, { tiles: false, color: P3.stoneD });
     }
-    // the way out (north): a door that opens after the root is dug up
+    // the way out (north): a door that opens after the root is dug up — behind the big mirror (the King's, §7.6)
     this.exitDoor = new CrystalDoor(L, B, 0, 0, -151, 4, 3.4, true);
+    this.kingMirror = new KingMirror(L, B, 0, c.z - 15.6);
+    this.refl.add(this.kingMirror.panel);
+    if (L.seen.has('fangs3_ending')) this.kingMirror.shatter(false);
     for (const z of [-154, -158, -162]) for (const s of [-1, 1]) nightFlower(L, s * 3.6, 0, z, 0.9, s > 0 ? P3.petalM : P3.petalB, z * s, B);
   }
 
@@ -411,9 +469,103 @@ export class Garden implements Netted {
     this.courtBeam = m;
   }
 
+  /** a little timer (not a script: L.runGen would count as a cutscene) */
+  private timers: { t: number; f: () => void }[] = [];
+  after(secs: number, f: () => void) { this.timers.push({ t: secs, f }); }
+
+  /** a page of Карамель's diary on a little lectern (§7.2.2): a sign; reading it, a bark of the four */
+  private note(key: string, x: number, z: number, rotY: number) {
+    const L = this.L;
+    const n = NOTES.find((q) => q.key === key)!;
+    L.add(P.signpost({ x, y: 0, z, rotY, text: 'Дневник' }));
+    L.signAt(x, 0, z, n.sign);
+    this.noteAt.push({ key, pos: V(x, 0, z) });
+  }
+  /** the can after the cold open: lying on its side by the court's bed */
+  dropCan() {
+    const c = this.can;
+    c.lying = true; c.tilt = 0; c.pour = 0;
+    c.root.visible = true;
+    c.root.position.copy(CAN_DROPPED);
+    c.root.rotation.set(0, 0.8, 0);
+    c.update(0);
+  }
+
+  /** a bark of one of the four: over the hero who plays them (any machine's figure), else over the story NPC if it
+   *  stands here, else over my hero with the name in front («Пастила: …») — solo and teams without them hear it too */
+  barkFor(kind: Bk, str: string, dur = 2.6) {
+    const L = this.L;
+    for (const h of L.heroes()) {
+      const k = h.isLocal ? L.player.kind : (h as unknown as { kind?: string }).kind;
+      const root = h.isLocal ? L.player.root : (h as unknown as { root?: THREE.Object3D }).root;
+      if (k === kind && root && !h.dead && h.pos.distanceTo(L.player.pos) < 22) { L.bark(root, str, dur, kind === 'bublik' ? 1.4 : 1.9); return; }
+    }
+    const n = this.cast?.figs[kind];
+    if (n && n.root.visible && n.root.position.distanceTo(L.player.pos) < 26) { L.bark(n.root, str, dur, 1.9); return; }
+    L.bark(L.player.root, `${NAMES[kind]}: ${str}`, dur + 0.4, L.player.kind === 'bublik' ? 1.4 : 1.9);
+  }
+
+  /** §7.2.4 the echo: 1.5 s after a bar of the four, its last two words come back as a whisper (≤ once in 10 s);
+   *  in the fight they are kept for the decoys to whisper back (§7.4 phase 2). Local to every machine. */
+  private hookBarks() {
+    const L = this.L;
+    const orig = L.bark.bind(L);
+    L.bark = (obj, str, dur, dy) => {
+      orig(obj, str, dur, dy);
+      if (!this.isHeroObj(obj) || str.startsWith('…')) return;
+      const e = echoOf(str.replace(/^[А-ЯЁ][а-яё]+: /, ''));
+      if (!e) return;
+      this.heard.push(e);
+      if (this.heard.length > 6) this.heard.shift();
+      if (this.won || this.fight || L.t < this.echoT) return;
+      this.echoT = L.t + ECHO.every;
+      const at = obj.getWorldPosition(new THREE.Vector3());
+      const yaw = obj.rotation.y;
+      this.after(ECHO.delay, () => this.whispers.say(at.clone().add(V(-Math.sin(yaw) * 1.6, 0.3, -Math.cos(yaw) * 1.6)), e, 2.8));
+    };
+  }
+  private isHeroObj(obj: THREE.Object3D) {
+    const L = this.L;
+    if (obj === L.player.root) return true;
+    for (const h of L.heroes()) if ((h as unknown as { root?: THREE.Object3D }).root === obj) return true;
+    if (this.cast) for (const k of ['tosha', 'bublik', 'noki', 'pastila'] as const) if (this.cast.figs[k].root === obj) return true;
+    return false;
+  }
+
+  /** the maze (§7.2.3): the girl with the guitar stands behind the glass a cell or two ahead of me on the way out —
+   *  every mirror around shows her pointing on; in the last cell she points at the mirror that is a doorway */
+  private mazeGirl(dt: number) {
+    const L = this.L, p = L.player.pos, gl = this.girl;
+    const inMaze = p.z < -82.5 && p.z > -101.3 && Math.abs(p.x) < 12 && !L.inCutscene;
+    gl.on = Math.max(0, Math.min(1, gl.on + (inMaze ? dt * 1.5 : -dt * 2)));
+    if (!inMaze) return;
+    if (!this.said.has('girl')) {
+      this.said.add('girl');
+      this.after(1.4, () => this.barkFor(MAZE_GIRL[0][0], MAZE_GIRL[0][1]));
+      this.after(4.6, () => this.barkFor(MAZE_GIRL[1][0], MAZE_GIRL[1][1], 3));
+    }
+    let c = Math.floor((p.x + 12) / 3), r = Math.floor((-83 - p.z) / 3);
+    c = Math.max(0, Math.min(7, c)); r = Math.max(0, Math.min(5, r));
+    // two steps along the way out (fewer near the end); at the exit cell: in the doorway itself
+    let cr = r, cc = c;
+    for (let k = 0; k < 2; k++) {
+      const here = MAZE_DIST.d.get(`${cr},${cc}`);
+      if (here === undefined || here === 0) break;
+      const next = ([[cr + 1, cc], [cr - 1, cc], [cr, cc + 1], [cr, cc - 1]] as [number, number][]).find(([r2, c2]) => MAZE_DIST.open(cr, cc, r2, c2) && MAZE_DIST.d.get(`${r2},${c2}`) === here - 1);
+      if (!next) break;
+      [cr, cc] = next;
+    }
+    const at = cr === 5 && cc === MAZE_EXIT_C && r === 5 && c === MAZE_EXIT_C ? V(this.exitAt.x, 0, this.exitAt.z - 1.4) : V(cellX(cc), 0, cellZ(cr));
+    gl.flip = at.x < p.x;
+    gl.pos.lerp(at, Math.min(1, dt * 2.5));
+  }
+
   /** what the mirrors show (every machine, from what it draws) */
   private ghosts(): GhostSrc[] {
     const L = this.L, out: GhostSrc[] = [];
+    if (L.castHidden && this.cast) {
+      for (const k of ['tosha', 'bublik', 'pastila'] as const) { const r = this.cast.figs[k].root; if (r.visible) out.push({ kind: 'hero', pos: r.position, h: k === 'bublik' ? 0.8 : 1.15 }); }
+    }
     for (const h of L.heroes()) {
       if (h.dead || h.hidden || L.castHidden) continue;
       const kind = h.isLocal ? L.player.kind : (h as unknown as { kind?: string }).kind;
@@ -424,6 +576,8 @@ export class Garden implements Netted {
     const b = this.boss?.ghost();
     if (b) out.push({ kind: 'boss', pos: b, h: 2.7 });
     if (!this.way[3].m.locked || this.L.player.pos.z > -112) out.push({ kind: 'exit', pos: this.exitAt, h: 3.6 });
+    if (this.girl.on > 0.02) out.push({ kind: 'girl', pos: this.girl.pos, h: 1.5, flip: this.girl.flip, alpha: this.girl.on });
+    if (this.sceneGhosts) out.push(...this.sceneGhosts);
     return out;
   }
 
@@ -454,6 +608,12 @@ export class Garden implements Netted {
     const L = this.L, p = L.player;
     this.cast?.update(dt);
     castMouths(L);
+    if (this.timers.length) {
+      for (const tm of this.timers) tm.t -= dt;
+      const due = this.timers.filter((tm) => tm.t <= 0);
+      this.timers = this.timers.filter((tm) => tm.t > 0);
+      for (const tm of due) tm.f();
+    }
     const busy = L.inCutscene || !p.control || L.worldCut;
     for (const w of this.way) { w.m.update(dt); w.m.interact(p, busy); }
     for (const m of this.arenaMirrors) { m.update(dt); m.interact(p, busy || !this.fight); }
@@ -467,6 +627,18 @@ export class Garden implements Netted {
     this.whispers.update(dt);
     this.bedCrystal.spin(dt);
     this.bud.update(dt);
+    this.can.update(dt);
+    this.kingMirror.update(dt);
+    this.mazeGirl(dt);
+    // Карамель's notes: reading one (standing at it), a bark of the four (§7.2.2)
+    if (!L.inCutscene) for (const n of this.noteAt) {
+      if (this.notesRead.has(n.key) || Math.hypot(p.pos.x - n.pos.x, p.pos.z - n.pos.z) > 2.6) continue;
+      this.notesRead.add(n.key);
+      const bs = NOTES.find((q) => q.key === n.key)!.barks;
+      bs.forEach(([k, str], i) => this.after(0.9 + i * 2.6, () => this.barkFor(k, str)));
+    }
+    // Тоша, once, in the wing (§7.2.5)
+    if (!this.said.has('toshaWing') && p.pos.z < -31 && p.pos.z > -78 && !L.inCutscene) { this.said.add('toshaWing'); this.barkFor('tosha', TOSHA_WING); }
     // invisible servants leave prints in the pollen
     for (const e of L.enemies) {
       if (e.dead || e.kind !== 'servant') continue;
@@ -538,10 +710,14 @@ export class Garden implements Netted {
       L.fx.stars(p.center(), 20);
       L.hud.toast('Шёпот в куполе! Все сюда!');
     }
-    // the four's barks during the fight
-    if (b.active && !b.beaten) {
-      if (p.kind === 'bublik' && b.pos.distanceTo(p.pos) < 3 && b.vis < 0.3 && !this.said.has('bublikHelp')) { this.said.add('bublikHelp'); L.bark(p.root, HELP.bublik, 2.2, 1.9); }
-      if (p.kind === 'tosha' && b.phase === 2 && !this.said.has('toshaHelp')) { this.said.add('toshaHelp'); L.bark(p.root, HELP.tosha, 2.2, 1.9); }
+    // the four's barks during the fight (§7.4; over whoever plays them, the balcony NPC, or my hero with the name)
+    if (b.active && !b.beaten && !L.inCutscene) {
+      this.fightT += dt;
+      const once = (k: string) => (this.said.has(k) ? false : (this.said.add(k), true));
+      if (this.fightT > 4 && once('h:tosha')) this.barkFor('tosha', HELP.tosha);
+      if (this.fightT > 9 && b.vis > 0.8 && once('h:bublik')) this.barkFor('bublik', HELP.bublik);
+      if (b.phase === 3 && once('h:dark')) this.barkFor('pastila', HELP.pastilaDark, 3);
+      if (p.kind === 'noki' && p.atk === 'chord' && once('h:noki')) this.barkFor('noki', HELP.noki);
     }
     // solo: the story NPC does the team's move (GDD §8)
     if (L.nl || !b.active || b.beaten || L.worldCut) return;

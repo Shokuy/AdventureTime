@@ -21,7 +21,12 @@ export interface ShepotAnim {
   /** how visible (0..1): the eye glow follows it (the body's dither is the Invisibility's) */
   vis: number;
 }
-export interface ShepotRig { root: THREE.Group; M: Mats; top: number; hand: THREE.Object3D; update(dt: number, a: ShepotAnim): void }
+export interface ShepotRig {
+  root: THREE.Group; M: Mats; top: number; hand: THREE.Object3D;
+  /** (small form) the folded yellowed diary page in his paw — hidden until the defeat scene's К4 */
+  page: THREE.Object3D;
+  update(dt: number, a: ShepotAnim): void;
+}
 
 const CLOAK = '#2a2142', CLOAK_IN = '#4a2a6a', SKIN = '#cfc3e8', EAR_IN = '#f0a8c8';
 
@@ -106,6 +111,12 @@ export function createShepot(): ShepotRig {
     part(sh, G.ball(), basic('#b8203a'), [s * 0.065, 0.015, 0.185], [0.025, 0.03, 0.015], undefined, { cast: false });
   }
   for (const s of [1, -1]) part(sh, G.cone(), basic('#ffffff'), [s * 0.025, -0.1, 0.17], [0.012, 0.035, 0.012], [Math.PI, 0, 0], { cast: false });
+  // Карамель's huge garden apron, down to his heels (v2 §2.3): a sage-green bib with a pocket, a strap round the neck
+  const apronM = M.get('#8aa878'), apronD = M.get('#6a8a5a');
+  part(sb, G.sphere(), apronM, [0, 0.36, 0.12], [0.3, 0.36, 0.16]);
+  part(sb, G.sphere(), apronM, [0, 0.12, 0.2], [0.5, 0.12, 0.32]); // the hem spread on the bed around him
+  part(sb, G.sphere(), apronD, [0, 0.3, 0.27], [0.12, 0.08, 0.03], undefined, { cast: false }); // the pocket
+  part(sb, G.torus(0.13, 0.015, 6, 14), apronD, [0, 0.66, 0.02], 1, [Math.PI / 2 - 0.3, 0, 0]);
   const paws: THREE.Group[] = [];
   for (const s of [1, -1]) {
     const a = grp(sb, [s * 0.18, 0.55, 0.08]);
@@ -113,11 +124,16 @@ export function createShepot(): ShepotRig {
     part(a, G.sphere(), M.get(SKIN), [0, -0.26, 0], 0.05);
     paws.push(a);
   }
+  // the page: a folded yellowed sheet with a few lines of handwriting
+  const page = grp(paws[0], [0, -0.3, 0.06]);
+  part(page, boxGeo(), M.get('#f0dca0'), [0, 0, 0], [0.16, 0.2, 0.012]);
+  for (let i = 0; i < 4; i++) part(page, boxGeo(), basic('#8a6a3a'), [0, 0.06 - i * 0.04, 0.008], [0.11, 0.008, 0.002], undefined, { cast: false });
+  page.visible = false;
 
   const blinker = new Blinker();
   let t = Math.random() * 5, sway = 0, lunge = 0;
   return {
-    root, M, top: 2.7, hand,
+    root, M, top: 2.7, hand, page,
     update(dt, a) {
       dt = Math.min(dt, 0.05); t += dt;
       big.visible = a.small < 0.5;
@@ -160,6 +176,8 @@ export function createShepot(): ShepotRig {
     },
   };
 }
+
+const boxGeo = () => cached('f3-box', () => new THREE.BoxGeometry(1, 1, 1));
 
 let gT: THREE.Texture | null = null;
 function glowTex() {

@@ -12,7 +12,9 @@ import type { VAnim, VRig } from '../vampires';
 const fo = { cast: false };
 
 // ───────────────────────── paintings ─────────────────────────
-export type PaintKind = 'lady' | 'knight' | 'candy' | 'bear' | 'girl' | 'netopyr' | 'morok' | 'shepot' | 'twins' | 'king' | 'baker' | 'owl';
+export type PaintKind = 'lady' | 'knight' | 'candy' | 'bear' | 'girl' | 'netopyr' | 'morok' | 'shepot' | 'twins' | 'king' | 'baker' | 'owl'
+  /** (v2 §9.2.1) the servants as they were before the deal */
+  | 'tailor' | 'frog' | 'eared' | 'sisters';
 const PAINT_CACHE = new Map<string, THREE.Texture>();
 /** a grey painting (the King drank its colours): figure, background, a little plaque line; `color` = restored */
 export function paintingTex(kind: PaintKind, color = false) {
@@ -49,6 +51,55 @@ export function paintingTex(kind: PaintKind, color = false) {
       case 'king': body('#1e1830'); head('#cfcfdb', 0.4, 46); g.fillStyle = '#e8e4f4'; g.beginPath(); g.arc(cx, h * 0.22, 26, Math.PI * 0.85, Math.PI * 2.15); g.arc(cx, h * 0.24, 19, Math.PI * 2.1, Math.PI * 0.9, true); g.fill(); eyesAt(0.4); g.fillStyle = '#c02040'; for (const s of [-1, 1]) { g.beginPath(); g.arc(cx + s * 16, h * 0.4, 4, 0, TAU); g.fill(); } break;
       case 'baker': body(C('#fffaf6', '#8e8c96')); head(C('#ffe8d8', '#a09ea8')); g.fillStyle = C('#ffffff', '#b8b6c0'); g.beginPath(); g.ellipse(cx, h * 0.24, 40, 26, 0, 0, TAU); g.fill(); eyesAt(0.43); break;
       case 'owl': body(C('#8a6a4a', '#66646e')); head(C('#a88a6a', '#7e7c86'), 0.42, 54); eyesAt(0.42, 22); break;
+      case 'tailor': {
+        // Финтифлюш the tailor: a striped waistcoat, a pointed nose, a tape measure round the neck, a pincushion
+        body(C('#c84a6a', '#6a6872'));
+        g.fillStyle = C('#ffd0e0', '#8a8892'); for (let i = -3; i <= 3; i++) g.fillRect(cx + i * 20 - 4, h * 0.66, 8, h * 0.3);
+        head(C('#f0d8c8', '#a2a0aa'), 0.4, 42);
+        g.fillStyle = C('#6a4a8a', '#4e4c56'); g.beginPath(); g.ellipse(cx, h * 0.3, 44, 18, 0, Math.PI, TAU); g.fill();
+        g.fillStyle = C('#f0d8c8', '#a2a0aa'); g.beginPath(); g.moveTo(cx - 6, h * 0.43); g.lineTo(cx + 26, h * 0.47); g.lineTo(cx - 4, h * 0.49); g.fill();
+        g.strokeStyle = C('#ffd84a', '#b8b6c0'); g.lineWidth = 10; g.beginPath(); g.moveTo(cx - 40, h * 0.56); g.quadraticCurveTo(cx, h * 0.66, cx + 40, h * 0.56); g.lineTo(cx + 34, h * 0.8); g.moveTo(cx - 40, h * 0.56); g.lineTo(cx - 30, h * 0.84); g.stroke();
+        g.fillStyle = '#4a4850'; for (let i = 0; i < 6; i++) g.fillRect(cx - 36 + i * 13, h * 0.58 + Math.sin(i * 0.7) * 8, 2, 8);
+        eyesAt(0.4, 15);
+        break;
+      }
+      case 'frog': {
+        // Морося, a frog in freckles (no veil yet)
+        body(C('#5aa86a', '#66646e'));
+        head(C('#7ad08a', '#8e8c96'), 0.46, 56);
+        for (const s2 of [-1, 1]) { g.fillStyle = C('#7ad08a', '#8e8c96'); g.beginPath(); g.arc(cx + s2 * 30, h * 0.31, 22, 0, TAU); g.fill(); g.fillStyle = '#d8d8e0'; g.beginPath(); g.arc(cx + s2 * 30, h * 0.31, 12, 0, TAU); g.fill(); g.fillStyle = '#2a2830'; g.beginPath(); g.arc(cx + s2 * 30, h * 0.32, 5, 0, TAU); g.fill(); }
+        g.fillStyle = C('#a86a3a', '#5e5c66'); for (let i = 0; i < 9; i++) { g.beginPath(); g.arc(cx - 34 + (i % 3) * 8 + (i > 4 ? 52 : 0), h * 0.47 + Math.floor(i / 3) % 2 * 8, 3, 0, TAU); g.fill(); }
+        g.strokeStyle = '#3a3840'; g.lineWidth = 4; g.beginPath(); g.arc(cx, h * 0.48, 28, 0.2, Math.PI - 0.2); g.stroke();
+        g.fillStyle = C('#ff8ab8', '#8e8c96'); g.beginPath(); g.arc(cx + 40, h * 0.27, 10, 0, TAU); g.fill();
+        break;
+      }
+      case 'eared': {
+        // Шуршик, the gardener's pupil: huge ears, a watering can
+        body(C('#5a8a4a', '#66646e'));
+        for (const s2 of [-1, 1]) { g.fillStyle = C('#f0c8b0', '#9e9ca6'); g.beginPath(); g.ellipse(cx + s2 * 62, h * 0.36, 22, 40, s2 * 0.5, 0, TAU); g.fill(); g.fillStyle = C('#e8a090', '#86848e'); g.beginPath(); g.ellipse(cx + s2 * 62, h * 0.36, 11, 26, s2 * 0.5, 0, TAU); g.fill(); }
+        head(C('#f0c8b0', '#9e9ca6'), 0.42, 42);
+        g.fillStyle = C('#8a5a2a', '#4e4c56'); g.beginPath(); g.ellipse(cx, h * 0.32, 40, 18, 0, Math.PI, TAU); g.fill();
+        eyesAt(0.42, 14);
+        // the watering can
+        g.fillStyle = C('#4a8ac8', '#76747e'); g.fillRect(cx + 20, h * 0.72, 56, 40); g.beginPath(); g.moveTo(cx + 74, h * 0.76); g.lineTo(cx + 108, h * 0.66); g.lineTo(cx + 108, h * 0.7); g.lineTo(cx + 76, h * 0.84); g.fill();
+        g.strokeStyle = C('#4a8ac8', '#76747e'); g.lineWidth = 6; g.beginPath(); g.arc(cx + 48, h * 0.72, 18, Math.PI, TAU); g.stroke();
+        break;
+      }
+      case 'sisters': {
+        // the twin keepers of the stone, laughing face to face; the traffic-light stone between them
+        for (const s2 of [-1, 1]) {
+          g.fillStyle = s2 < 0 ? C('#6a4ab8', '#5a5862') : C('#c84a8a', '#66646e');
+          g.beginPath(); g.ellipse(cx + s2 * 58, h * 0.94, 42, 76, 0, Math.PI, TAU); g.fill();
+          g.fillStyle = C('#f0dcd0', '#9e9ca6'); g.beginPath(); g.arc(cx + s2 * 58, h * 0.5, 30, 0, TAU); g.fill();
+          g.fillStyle = C('#3a2a4a', '#4a4850'); g.beginPath(); g.ellipse(cx + s2 * 58, h * 0.44, 32, 16, 0, Math.PI, TAU); g.fill();
+          g.beginPath(); g.ellipse(cx + s2 * 84, h * 0.56, 7, 22, 0, 0, TAU); g.fill();
+          g.fillStyle = '#d8d8e0'; g.beginPath(); g.ellipse(cx + s2 * 58 - s2 * 10, h * 0.49, 6, 8, 0, 0, TAU); g.fill();
+          g.fillStyle = '#3a2830'; g.beginPath(); g.arc(cx + s2 * 58 - s2 * 8, h * 0.56, 9, 0, Math.PI); g.fill();
+        }
+        g.fillStyle = '#4a4850'; g.fillRect(cx - 14, h * 0.6, 28, 74);
+        ['#e83a3a', '#ffd84a', '#5ad86a'].forEach((c, i) => { g.fillStyle = C(c, ['#8a8892', '#b0aeb8', '#9a98a2'][i]); g.beginPath(); g.arc(cx, h * 0.64 + i * 22, 9, 0, TAU); g.fill(); });
+        break;
+      }
     }
     // varnish cracks
     g.strokeStyle = 'rgba(0,0,0,0.18)'; g.lineWidth = 1.5;

@@ -70,36 +70,36 @@ const EP_LIST: Episode[] = [
     teaser: 'Зефирные башни, пряничные домики и принцесса-учёная Пастила. Здесь лавка, Зеркало героев и лаборатория.',
   },
   {
-    id: 'fangs1', n: 2, title: 'Клыки в пастиле', subtitle: 'Граф Нетопырь', arc: ARC_FANGS,
+    id: 'fangs1', n: 2, title: 'Клыки в пастиле', subtitle: 'Граф Нетопырь · Ночь 1 из 5', arc: ARC_FANGS,
     node: { name: 'Пастильная площадь', x: 2, z: 16, look: 'square' },
     levels: ['fangs1_town', 'fangs1_roofs'], unlocks: ['fangs2'], links: ['fangs2'],
     // the arc starts after the meeting in Пастила's lab (docs/script-fangs.md 4.4, scene `hub_lab_plan`)
     flag: 'hub_lab_plan', lockHint: 'Туман. Сначала — лаборатория принцессы в Пастильном королевстве',
-    teaser: 'Над городом встала Алая луна. Жители стали серыми и сонными, а на крышах кто-то шуршит крыльями…',
+    teaser: 'Праздник фонариков, таинственный судья из-за гор и приглашение на ужин, где блюдо — вы.',
   },
   {
-    id: 'fangs2', n: 3, title: 'Туманные топи', subtitle: 'Мадам Морок', arc: ARC_FANGS,
+    id: 'fangs2', n: 3, title: 'Туманные топи', subtitle: 'Мадам Морок · Ночь 2 из 5', arc: ARC_FANGS,
     node: { name: 'Туманные топи', x: 24, z: 10, look: 'swamp' },
     levels: ['fangs2_swamp'], unlocks: ['fangs3'], links: ['fangs3', 'carnival'],
-    teaser: 'Дома на сваях, огоньки над водой и оборотень, который умеет становиться кем угодно. Даже тобой.',
+    teaser: 'Светлячков украли голосом паромщика. Хозяйка топей умеет стать кем угодно. Даже вами.',
   },
   {
-    id: 'fangs3', n: 4, title: 'Стеклянная оранжерея', subtitle: 'Шёпот', arc: ARC_FANGS,
+    id: 'fangs3', n: 4, title: 'Стеклянная оранжерея', subtitle: 'Шёпот · Ночь 3 из 5', arc: ARC_FANGS,
     node: { name: 'Стеклянная оранжерея', x: 10, z: -12, look: 'glass' },
     levels: ['fangs3_garden'], unlocks: ['fangs4'], links: ['fangs4', 'ice'],
-    teaser: 'Хрустальный сад, зеркала и лунный свет. Здесь живёт тот, кого не видно — только слышно.',
+    teaser: 'Сад Карамели. Лейка поливает сама, а зеркала смотрят в ответ.',
   },
   {
-    id: 'fangs4', n: 5, title: 'Чёрный перевал', subtitle: 'Сёстры Близняшки', arc: ARC_FANGS,
+    id: 'fangs4', n: 5, title: 'Чёрный перевал', subtitle: 'Сёстры Близняшки · Ночь 4 из 5', arc: ARC_FANGS,
     node: { name: 'Чёрный перевал', x: 32, z: -20, look: 'pass' },
     levels: ['fangs4_pass'], unlocks: ['fangs5'], links: ['fangs5', 'fire'],
-    teaser: 'Дорога к замку: шаткие мосты над пропастью, ветер и две сестры, которые никогда не смотрят в одну сторону.',
+    teaser: 'Две сестры сто лет стоят спиной к спине и сторожат старый камень.',
   },
   {
-    id: 'fangs5', n: 6, title: 'Замок Полночь', subtitle: 'Король Полночь', arc: ARC_FANGS,
+    id: 'fangs5', n: 6, title: 'Замок Полночь', subtitle: 'Король Полночь · Ночь 5 из 5', arc: ARC_FANGS,
     node: { name: 'Замок Полночь', x: 46, z: -36, look: 'castle' },
     levels: ['fangs5_castle'], unlocks: [], links: [],
-    teaser: 'Замок на скале под огромной луной. Король Полночь ждёт. Пастиле нужно время, чтобы зарядить Солнечную пушку.',
+    teaser: 'Стол накрыт на сто персон. Алая полночь. Минута — это очень долго.',
   },
   // future lands: on the map, locked, in fog
   {

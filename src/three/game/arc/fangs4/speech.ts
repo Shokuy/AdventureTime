@@ -11,11 +11,18 @@ import { drawPortrait, PORTRAIT_INFO } from '../../../../art/portraits';
  * speech helper (arc/town/speech.ts); the twins Ночка / Тенька get their own box and portrait here. While a line is
  * typed, the matching story-cast figure (L.npc) moves its mouth; `onTalk` lets the boss rigs talk too.
  */
-export type F4Speaker = SpeakerId | 'nochka' | 'tenka';
+type Local = 'nochka' | 'tenka' | 'polnoch' | 'karamel';
+export type F4Speaker = SpeakerId | Local;
 
-const SIS: Record<'nochka' | 'tenka', { name: string; color: string }> = { nochka: PORTRAIT_INFO.nochka, tenka: PORTRAIT_INFO.tenka };
+const PI = PORTRAIT_INFO as Record<string, { name: string; color: string } | undefined>;
+/** the speakers this level draws itself: the twins, the King's voice (8.0), Карамель's diary (8.7, v2 §0) */
+const LOCAL: Record<Local, { name: string; color: string }> = {
+  nochka: PORTRAIT_INFO.nochka, tenka: PORTRAIT_INFO.tenka, polnoch: PORTRAIT_INFO.polnoch,
+  karamel: { name: PI.karamel?.name ?? 'Карамель (дневник)', color: PI.karamel?.color ?? '#c8783a' },
+};
+const isLocal = (w: F4Speaker): w is Local => w in LOCAL;
 
-const mine = new WeakMap<Dialog, 'nochka' | 'tenka' | null>();
+const mine = new WeakMap<Dialog, Local | null>();
 const hooked = new WeakSet<Dialog>();
 /** boss rigs that talk (set by twins.ts) */
 export const talkers = new WeakMap<Level3D, (who: 'nochka' | 'tenka') => void>();
@@ -38,7 +45,7 @@ export function say(L: Level3D, who: F4Speaker, str: string, expr?: string): Wai
   hook(L);
   const d = L.dialog;
   let w: Waiter;
-  if (who === 'nochka' || who === 'tenka') {
+  if (isLocal(who)) {
     // (the hub helper's own speaker must not draw over ours: hand it a plain narrator line first)
     w = townSay(L, 'narrator', str, expr);
     mine.set(d, who);
@@ -59,9 +66,9 @@ export function say(L: Level3D, who: F4Speaker, str: string, expr?: string): Wai
   };
 }
 
-function drawBox(d: Dialog, ctx: CanvasRenderingContext2D, id: 'nochka' | 'tenka') {
+function drawBox(d: Dialog, ctx: CanvasRenderingContext2D, id: Local) {
   if (d.appear <= 0) return;
-  const sp = SIS[id];
+  const sp = LOCAL[id];
   const a = ease.outBack(clamp(d.appear, 0, 1));
   const bw = 1060, bh = Dialog.BOX_H;
   const bx = (W - bw) / 2, by = d.top ? 30 - (1 - a) * 80 : H - bh - 26 + (1 - a) * 80;
@@ -87,7 +94,43 @@ function drawBox(d: Dialog, ctx: CanvasRenderingContext2D, id: 'nochka' | 'tenka
   ctx.restore();
 }
 
-/** round portrait of a sister: the shared cast portraits (art/portraits.ts) — mirrored twins, Ночка looks left, Тенька right */
-function face(ctx: CanvasRenderingContext2D, id: 'nochka' | 'tenka', cx: number, cy: number, r: number, t: number, talk: number, expr?: string) {
+/** round portrait: the shared cast portraits (art/portraits.ts); Карамель's diary until it has a shared one */
+function face(ctx: CanvasRenderingContext2D, id: Local, cx: number, cy: number, r: number, t: number, talk: number, expr?: string) {
+  if (id === 'karamel' && !PI.karamel) { diary(ctx, cx, cy, r, t); return; }
   drawPortrait(ctx, id, cx, cy, r, t, talk, expr);
+}
+
+/** Карамель (дневник): an open notebook with a watering can on the cover, in warm firelight (v2 §0) */
+function diary(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, t: number) {
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  const g = ctx.createRadialGradient(cx, cy + r * 0.3, r * 0.1, cx, cy, r);
+  g.addColorStop(0, '#ffd890'); g.addColorStop(1, '#c8783a');
+  ctx.fillStyle = g; ctx.fill();
+  ctx.lineWidth = 5; ctx.strokeStyle = OUT; ctx.stroke();
+  ctx.clip();
+  const sway = Math.sin(t * 1.6) * 0.04;
+  ctx.translate(cx, cy + r * 0.08); ctx.rotate(sway);
+  const w = r * 0.78, h = r * 0.95;
+  // the two pages
+  for (const s of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(0, -h * 0.42); ctx.quadraticCurveTo(s * w * 0.5, -h * 0.52, s * w, -h * 0.44);
+    ctx.lineTo(s * w, h * 0.42); ctx.quadraticCurveTo(s * w * 0.5, h * 0.34, 0, h * 0.44); ctx.closePath();
+    ctx.fillStyle = '#fff4d8'; ctx.fill(); ctx.lineWidth = 3; ctx.strokeStyle = '#6a3a1a'; ctx.stroke();
+    // handwriting
+    ctx.strokeStyle = 'rgba(90,50,30,0.55)'; ctx.lineWidth = 2;
+    for (let i = 0; i < 5; i++) {
+      const y = -h * 0.28 + i * h * 0.14;
+      ctx.beginPath();
+      for (let k = 0; k <= 8; k++) { const x = s * (w * 0.12 + k * w * 0.09); const yy = y + Math.sin(k * 2.1 + i) * 1.5; if (k) ctx.lineTo(x, yy); else ctx.moveTo(x, yy); }
+      ctx.stroke();
+    }
+  }
+  // a little watering can drawn in the corner of the right page
+  ctx.translate(w * 0.55, h * 0.22);
+  ctx.fillStyle = '#4aa86a'; ctx.strokeStyle = '#1e4a2a'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.ellipse(0, 0, r * 0.11, r * 0.08, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(r * 0.08, -r * 0.02); ctx.lineTo(r * 0.2, -r * 0.1); ctx.lineWidth = 3; ctx.stroke();
+  ctx.restore();
 }

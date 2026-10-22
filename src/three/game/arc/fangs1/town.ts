@@ -18,10 +18,12 @@ import { Cast } from './cast';
 import { createCount, type CountRig, type CountAnim } from './bossRig';
 import { Squirter, companion, specialFolk, actText } from './common';
 import { TITLE, DEATH, SIGNS, BARK, TOAST } from './lines';
+import { JuryStage, PaperLantern, CONTEST, JUDGE_AT, JURY, type ContestId } from './stage';
 
 /*
- * «Клыки в пастиле», part 1 — `fangs1_town` (docs/script-fangs.md §5.1–5.3): Пастильное королевство at midnight,
- * built on the hub town (buildTown, night palette). The intro (5.1) plays on the square at the clock tower; then the
+ * «Клыки в пастиле», part 1 — `fangs1_town` (docs/script-fangs-v2.md §5.1–5.3): Пастильное королевство at midnight,
+ * built on the hub town (buildTown, night palette). The intro (5.1, «Судья из-за гор»: the lantern contest on the jury
+ * stage at the clock tower, stage.ts) plays on the square; then the
  * town is grey district by district and the tower's door is wrapped in a grey veil until four districts have their
  * colour back:
  *   • the square (start) — Мармеладка (5.2.1), biters, a flock of scouts; clears itself;
@@ -69,7 +71,7 @@ export function townLevel(): Level3Def {
   const p = TOWN_NIGHT;
   return {
     id: TOWN_ID, chapter: 0, title: TITLE.town, subtitle: 'Клыки в пастиле', music: 'night_town',
-    spawn: [-10.6, 0, -7.6], yaw: 0.85, killY: -12,
+    spawn: [-5.6, 0, -1.0], yaw: 0.85, killY: -12,
     bg: p.bg, fog: p.fog, hemi: p.hemi, sun: { ...p.sun, dir: [...p.sun.dir] as [number, number, number] },
     castScenes: true, deathText: DEATH.town,
     startScript: 'fangs1_intro',
@@ -273,7 +275,11 @@ export class NightTown {
   squirt: Squirter;
   /** the intro is on (deco townsfolk, the Count on the spire) */
   introOn = false;
-  deco: { folk: { rig: FolkRig; g: THREE.Group; anim: FolkAnim; id: string }[]; count: { rig: CountRig; g: THREE.Group; anim: CountAnim } | null; ladder: THREE.Group | null } = { folk: [], count: null, ladder: null };
+  deco: { folk: { rig: FolkRig; g: THREE.Group; anim: FolkAnim; id: string; lantern?: PaperLantern }[]; count: { rig: CountRig; g: THREE.Group; anim: CountAnim } | null; ladder: THREE.Group | null } = { folk: [], count: null, ladder: null };
+  /** v2 §5.1: the jury stage, the contest board, the dropped contest lanterns */
+  stage!: JuryStage;
+  /** the contestants' lanterns in the intro (by contestant) */
+  contest = new Map<ContestId, PaperLantern>();
   /** gameplay пресняки of the square: hidden while the intro shows the townsfolk before the wave */
   squareFolk: THREE.Object3D[] = [];
   marmeladka: THREE.Object3D | null = null;
@@ -316,7 +322,7 @@ export class NightTown {
     this.buildEast();
     this.buildSecrets();
     // candles
-    L.cp(-7.4, 0, -6.2);
+    L.cp(-6.2, 0, -2.4); // (off the contest's half-ring in front of the jury stage)
     L.cp(2.6, 0, 26.0);
     L.cp(-29.4, 0, 14.2);
     L.cp(-19.5, 0, -22.4);
@@ -328,6 +334,10 @@ export class NightTown {
     // the veil, the garlands
     this.veil = new Veil(L);
     this.door = new TowerDoor(L);
+    this.stage = new JuryStage(L);
+    this.stage.lying.visible = introSeen;
+    // v2 5.2.3: the Count's voice from the sky when a district comes back
+    V.onZone((id) => { if (id !== 'square' && REQUIRED.includes(id)) this.sky('district'); });
     const lamps = this.lay.lamps.slice(0, 8).map((p) => V3(p).setY(3.05));
     const spans: [THREE.Vector3, THREE.Vector3][] = lamps.map((p, i) => [p, lamps[(i + 1) % 8]]);
     spans.push([vec(TOWER.x + 1.6, 8.5, TOWER.z + 1.6), lamps[4]], [vec(TOWER.x + 1.6, 8.5, TOWER.z + 1.6), lamps[5]], [lamps[0], lamps[4]], [lamps[2], lamps[6]]);
@@ -355,9 +365,11 @@ export class NightTown {
   private buildSquare(introSeen: boolean) {
     const L = this.L, V = this.V;
     // the townsfolk: Мармеладка (5.2.1) by the start, two more; biters and a flock of scouts
-    const m = V.folk(-6.4, 0, -5.2, 'marmelad', 2.4);
-    const a = V.folk(-0.6, 0, -8.6, 'zefir', 0.4);
-    const b = V.folk(5.6, 0, 2.6, 'pryanik', -2.2);
+    // (the three contestants of the intro, grey where they stood: Мармеладка, Безе, Пончик)
+    const at = (id: ContestId) => CONTEST.find((k) => k.id === id)!;
+    const m = V.folk(at('marmeladka').at.x, 0, at('marmeladka').at.z, 'marmelad', at('marmeladka').yaw);
+    const a = V.folk(at('beze').at.x, 0, at('beze').at.z, 'zefir', at('beze').yaw);
+    const b = V.folk(at('ponchik').at.x, 0, at('ponchik').at.z, 'pryanik', at('ponchik').yaw);
     this.squareFolk = [m.root, a.root, b.root];
     this.marmeladka = m.root;
     specialFolk(L, m, {
@@ -516,16 +528,28 @@ export class NightTown {
     L.deco(lad);
     this.deco.ladder = lad;
     folk('zefirych', 'marsh', { color: '#fff8fa', hat: 'top', accent: '#6a6a9a', hold: 'pole', glasses: true }, lad.position.clone().setY(1.66), -1.2);
-    // the folk hanging lanterns (where the grey ones will shuffle about)
-    folk('marmeladka', 'gumdrop', { color: '#5ad86a', hold: 'lantern', hat: 'bow', accent: '#ff5a8a', scale: 0.85 }, V(-6.4, 0, -5.2), 2.4, 'wave');
-    folk('a', 'marsh', { color: '#ffd6e4', hat: 'kerchief', accent: '#ff5a8a' }, V(-0.6, 0, -8.6), 0.4, 'cheer');
-    folk('b', 'ginger', { hat: 'top', accent: '#ff5a8a' }, V(5.6, 0, 2.6), -2.2, 'talk');
+    // v2 §5.1: the three contestants in a half-ring before the jury stage, each with a paper lantern on a stick
+    // (where the grey ones will shuffle about after the wave)
+    for (const k of CONTEST) {
+      folk(k.id, k.kind, k.look, k.at, k.yaw, 'idle');
+      const f = this.deco.folk[this.deco.folk.length - 1];
+      const pl = new PaperLantern(k.color);
+      const s = k.look.scale ?? 1;
+      pl.g.position.set(-0.22 * s, 0.32 * s, 0.36 * s);
+      pl.g.rotation.y = -Math.PI / 2;
+      f.g.add(pl.g);
+      f.lantern = pl;
+      this.contest.set(k.id, pl);
+    }
     folk('c', 'cupcake', { color: '#ffc8e0', accent: '#9a6ad8', hat: 'chef' }, V(-4.1, 0, 4.4), 1.2); // (off the fountain's rim)
-    // the Count (a figure for the scene; the boss is on the roofs)
+    folk('d', 'marsh', { color: '#ffd6e4', hat: 'kerchief', accent: '#ff5a8a' }, V(-2.2, 0, -8.4), 0.2, 'cheer');
+    // the judge: the Count standing on the stage, facing the square (a figure for the scene; the boss is on the roofs)
+    // — he casts no shadow (§5.1 К5: «у гостя нет тени»)
     const rig = createCount();
-    const g = new THREE.Group(); g.add(rig.root); g.position.copy(TOWER.spire); g.visible = false;
+    rig.root.traverse((o) => { o.castShadow = false; });
+    const g = new THREE.Group(); g.add(rig.root); g.position.copy(JUDGE_AT); g.rotation.y = JURY.yaw;
     L.scene.add(g);
-    this.deco.count = { rig, g, anim: { st: 'perch', p: 0, flash: 0, talk: 0, small: 0, glow: 0.6, speed: 0 } };
+    this.deco.count = { rig, g, anim: { st: 'perch', p: 0, flash: 0, talk: 0, small: 0, glow: 0.3, speed: 0 } };
   }
   /** the intro is over (or was force-ended): the town as it is from now on */
   endIntro() {
@@ -537,6 +561,8 @@ export class NightTown {
     if (this.deco.count) { L.scene.remove(this.deco.count.g); this.deco.count = null; }
     for (const b of this.bats) L.scene.remove(b.g);
     this.bats = [];
+    this.contest.clear();
+    this.stage.lying.visible = true;
     for (const z of this.zones.values()) if (z.state === 'grey') z.amount = 1;
     for (const r of this.squareFolk) r.visible = true;
     for (const e of L.enemies) e.root.visible = true;
@@ -564,14 +590,14 @@ export class NightTown {
     this.burst = true;
   }
   /** intro: the grey wave over the town (zones fade in, the garlands and folk go grey) */
-  greyWave(secs: number) {
+  greyWave(secs: number, from = V(0, 0, 0)) {
     const L = this.L;
     this.waveT = 0; this.waveDur = secs;
     this.waved = true;
     this.garlands.set(false);
     ambient(L, () => {
-      L.fx.ring(V(0, 0.2, 0), 22, '#9a96a8', 1.2);
-      L.fx.ring(V(0, 0.4, 0), 12, '#c8c4d4', 0.8, false);
+      L.fx.ring(from.clone().setY(0.2), 26, '#9a96a8', 1.4);
+      L.fx.ring(from.clone().setY(0.4), 12, '#c8c4d4', 0.8, false);
       audio.sfx('drain', { pitch: 0.7 });
       L.tcam.shake(0.25);
     });
@@ -590,7 +616,11 @@ export class NightTown {
     if (this.introOn && !L.storyOn()) this.endIntro();
     // gameplay folk of the square stay out of the intro's picture before the wave
     if (this.introOn) {
-      for (const r of this.squareFolk) r.visible = this.waved && this.waveT < 0;
+      const twins = this.waved && this.waveT < 0;
+      for (const r of this.squareFolk) r.visible = twins;
+      // (the contestants' figures give way to their grey gameplay twins on the same spots; the lanterns are dropped)
+      for (const f of this.deco.folk) if (f.lantern) f.g.visible = !twins;
+      if (twins) this.stage.lying.visible = true;
       // the vampires come with the flock
       for (const e of L.enemies) if (isVamp(e)) e.root.visible = this.burst;
     }
@@ -626,10 +656,46 @@ export class NightTown {
     this.door.update(dt);
     if (!open && !this.veilToast && !this.introOn && !L.inCutscene && L.seen.has('fangs1_intro') && (this.zones.get('square')!.state !== 'grey' || Math.hypot(L.player.pos.x - TOWER.x, L.player.pos.z - TOWER.z) < 7.5) && this.t > 9) { this.veilToast = true; L.hint('f1veil', TOAST.veil); }
     L.refs.goalHint = open ? undefined : this.nextGoal();
+    this.skyEvents(open, dt);
     // the story four's lines on the way (solo)
     this.lines();
     this.squirt.update(dt);
     this.twinkle(dt);
+  }
+
+  // ───────────────────────── v2 5.2.3: the Count over the town ─────────────────────────
+  private skySaid = new Set<string>();
+  private skyQ: string[] = [];
+  private skyT = 0;
+  private fangT = 6;
+  /** the Count's voice from the sky (once per attempt each; queued so two in a row don't cut each other) */
+  sky(key: keyof typeof BARK.sky) {
+    if (this.skySaid.has(key) || this.introOn) return;
+    this.skySaid.add(key);
+    this.skyQ.push(BARK.sky[key]);
+  }
+  private skyEvents(open: boolean, dt: number) {
+    const L = this.L;
+    if (this.introOn) return;
+    if (L.arenas[this.marketArena]?.state === 'active') this.sky('ambush');
+    if (this.westLanterns.every((l) => l.lit)) this.sky('lanterns');
+    const n = this.zones.get('north')!;
+    const p = L.player.pos;
+    if (n.state === 'grey' && Math.hypot(p.x - n.center.x, p.z - n.center.z) < n.radius - 2 && L.enemies.some((e) => e.kind === 'brute' && !e.dead && inZone(e.home, n))) this.sky('brute');
+    if (open) this.sky('veil');
+    this.skyT -= dt;
+    if (this.skyQ.length && this.skyT <= 0 && !L.inCutscene) {
+      const s = this.skyQ.shift()!;
+      L.shout('Граф Нетопырь: ' + s, 3.4);
+      ambient(L, () => audio.sfx('batScreech', { pitch: 0.55, volume: 0.35 }));
+      this.skyT = 3.6;
+    }
+    // v2 5.2.4: «Клыкастые» quoting their Count, now and then
+    if ((this.fangT -= dt) <= 0 && !L.inCutscene) {
+      this.fangT = 8 + Math.random() * 6;
+      const f = L.enemies.find((e) => e.kind === 'fanger' && !e.dead && e.root.visible && e.body.pos.distanceTo(p) < 9);
+      if (f) L.bark(f.root, BARK.fangers[Math.floor(Math.random() * BARK.fangers.length)], 2.2, 2.3);
+    }
   }
 
   /** golden sparks rising over a walnut not found yet (within ~28 m: a hint from the street / the next roof) */
@@ -659,6 +725,7 @@ export class NightTown {
     const near = (x: number, z: number, r: number) => Math.hypot(p.x - x, p.z - z) < r;
     if (this.t > 10 && !near(-10.6, -7.6, 6)) companion(L, 'tosha_go', 'tosha', BARK.tosha[0]);
     if (near(0, 31, 6)) companion(L, 'pastila_syrup', 'pastila', BARK.pastila[0]);
+    if (near(-31.5, 0, 12) && this.westLanterns.filter((l) => l.lit).length < 2) companion(L, 'pastila_dark', 'pastila', BARK.pastilaDark);
     if (near(-31.5, 3, 9) && L.enemies.some((e) => e.kind === 'bat' && !e.dead && Math.hypot(e.body.pos.x - p.x, e.body.pos.z - p.z) < 10)) companion(L, 'noki_bat', 'noki', BARK.noki[0]);
     if (near(-14, -22.5, 8)) companion(L, 'bublik_angry', 'bublik', BARK.bublik[0]);
     if (near(4, -24, 8)) companion(L, 'tosha_together', 'tosha', BARK.tosha[1]);

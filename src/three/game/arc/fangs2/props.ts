@@ -402,6 +402,7 @@ export class SwampKit {
       g.position.set(c.x + d.x * 420, c.y - 32, c.z + d.z * 420);
       g.lookAt(c.x, g.position.y, c.z);
     });
+    return g;
   }
 
   /** finish the build: instanced meshes for all the small repeated things */

@@ -16,7 +16,7 @@ import { Tele, Stripe, uncaptured } from '../../bossParts';
 import { coop } from '../../coop';
 import { vampBane } from '../../heroes/bane';
 import { vamp, isVamp, heroId, Invisibility, ambient, markCharacter } from '../vampires';
-import { createKingMidnight, createGiantShadow, createShadowHand, kAnim, type KingRig, type GiantRig, type HandRig, type CannonRig } from './kingRig';
+import { createKingMidnight, createGiantShadow, createShadowHand, kAnim, girlTex, type KingRig, type GiantRig, type HandRig, type CannonRig } from './kingRig';
 import type { CannonHooks } from './enemies';
 import { F5 } from './lines';
 
@@ -34,7 +34,10 @@ import { F5 } from './lines';
  *  Phase 3 — «Довольно. Я — ночь!»: a giant shadow against the moon. Пастила charges the Солнечная пушка (60–90 s);
  *     his shadow hands crawl to the cannon (hit them back), slam at heroes, shadow imps run at her, «Луна, пей!» rings
  *     drain colour; every hit on Пастила costs charge. The clock strikes («БОМ!») as it fills; the twelfth = the shot.
- *  Then the solar shot burns his cloak and the scene `fangs5_boss_defeat` (Ноки's last strike) plays.
+ *     (v2) Once, at half charge, Ноки's own shadow (the girl with the guitar) catches a hand at the cannon and holds it
+ *     back: «ТЕНЬ НОКИ!» — «Опять ты?! Ты же моя!».
+ *  The fight ends on the shot (no last blow, v2 §9.4): the solar shot burns his cloak (Пастила aims at the cloak, not
+ *  at him) and the scene `fangs5_boss_defeat` (the spoon of syrup) plays.
  *
  * Co-op: the host runs everything (choices, HP, charge, summons, who is targeted); clients play the King, his twin,
  * the false heroes and the hands back from snapshots (id 950) at NetLevel.playT. Every act carries its timeline
@@ -53,7 +56,9 @@ const CENTER = new THREE.Vector3(ROOF.x, ROOF.y, ROOF.z);
 const STATES = ['intro', 'fight', 'transform', 'shadow', 'shot', 'dead'] as const;
 type St = typeof STATES[number];
 const ACTS = ['idle', 'walk', 'slash', 'lunge', 'blades', 'summon', 'stagger', 'cast', 'rise', 'hover', 'mark', 'dive', 'dazed', 'fall',
-  'decoy', 'swipe', 'gone', 'stalk', 'ambush', 'guard', 'sneak', 'throw', 'swap', 'rest', 'reach', 'slam', 'lift', 'recoil', 'snatch', 'kneel'] as const;
+  'decoy', 'swipe', 'gone', 'stalk', 'ambush', 'guard', 'sneak', 'throw', 'swap', 'rest', 'reach', 'slam', 'lift', 'recoil', 'snatch', 'kneel',
+  /** (v2) a hand at the cannon held back by Ноки's shadow */
+  'held'] as const;
 type Act = typeof ACTS[number];
 const POWERS = ['none', 'wings', 'shape', 'silence', 'twins'] as const;
 type Power = typeof POWERS[number];
@@ -219,6 +224,9 @@ export class Midnight3 implements Boss3Like, Netted {
   private shotBeam: THREE.Mesh;
   private pastilaHurt = 0;
   private myBarkT = 0;
+  /** (v2) Ноки's shadow holding a hand back at the cannon (shown on every machine from the hand's act) */
+  private girlHold: THREE.Mesh;
+  private girlUsed = false;
   private clockSeen = 0;
 
   constructor(L: Level3D, private hooks: BossHooks) {
@@ -263,6 +271,8 @@ export class Midnight3 implements Boss3Like, Netted {
     }
     this.shotBeam = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.6, 1, 20, 1, true), basic('#ffd040', { additive: true, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide, fog: false }));
     this.shotBeam.visible = false; noOutline(this.shotBeam); L.scene.add(this.shotBeam);
+    this.girlHold = new THREE.Mesh(new THREE.PlaneGeometry(1.25, 1.9).translate(0, 0.95, 0), new THREE.MeshBasicMaterial({ map: girlTex(), transparent: true, opacity: 0, depthWrite: false, color: '#7a5ac8', side: THREE.DoubleSide }));
+    this.girlHold.visible = false; noOutline(this.girlHold); L.scene.add(this.girlHold);
     // health: the room's difficulty, the party
     const base = coop.easy ? 135 : 180;
     this.hp = this.maxHp = Math.round(base * (L.nl ? coop.hpScale() : 1));
@@ -1005,9 +1015,12 @@ export class Midnight3 implements Boss3Like, Netted {
         if (d > 0.1) h.pos.addScaledVector(tmp2.normalize(), Math.min(d, sp * dt));
         h.pos.y = ROOF.y + 0.5;
         h.yaw = Math.atan2(h.tx - this.reachFrom.x, h.tz - this.reachFrom.z);
+        // (v2) once, at half charge: Ноки's shadow catches the hand a few steps from the cannon and holds it back
+        if (!this.girlUsed && this.charge >= 0.5 && d < 4.2) { this.girlUsed = true; this.girlCatch(L, h); break; }
         if (d < 1.9) { h.go('snatch', 1.0); this.hitPastila(L, h.pos, true); }
         break;
       }
+      case 'held': h.pos.y = ROOF.y + 0.5 + Math.sin(h.at * 18) * 0.05; if (h.at >= h.dur) { h.go('recoil', 3); this.bark(F5.phase3Barks[1], 1.6); } break;
       case 'slam': {
         const lock = h.w * 0.72;
         if (h.at < lock) { const f = this.fh(); h.tx += (f.pos.x - h.tx) * Math.min(1, dt * 4); h.tz += (f.pos.z - h.tz) * Math.min(1, dt * 4); }
@@ -1024,6 +1037,17 @@ export class Midnight3 implements Boss3Like, Netted {
     }
   }
   private reachFrom = new THREE.Vector3();
+  /** (v2 §9.4) «ТЕНЬ НОКИ!» — the host decides; the hand's act ('held') shows the shadow on every machine */
+  private girlCatch(L: Level3D, h: Slot) {
+    h.go('held', 3.4);
+    L.hud.showBanner(F5.girlBanner, '#b890ff');
+    this.bark(F5.girlBark, 2.4);
+    audio.sfx('clang', { pitch: 2.2, volume: 0.45 }); audio.sfx('colorRestore', { pitch: 0.8, volume: 0.5 });
+    L.tcam.shake(0.3);
+    L.fx.stars(h.pos.clone().setY(ROOF.y + 1.2), 18, ['#b890ff', '#ffffff', '#ff7ad0']);
+    // the hand let go of the cannon: a moment's peace for the charge
+    this.pauseT = 0;
+  }
 
   private fire(L: Level3D) {
     this.state = 'shot';
@@ -1197,7 +1221,7 @@ export class Midnight3 implements Boss3Like, Netted {
     audio.sfx('bossHit');
     L.fx.text(at.clone().setY(at.y + 1.2), String(amount), '#ffe14a', 28);
     L.fx.sparks(at.clone(), 12, ['#ffffff', '#c8a0ff', '#ffe14a']);
-    if (Math.random() < 0.12) this.bark(choose(F5.hurt), 1.2);
+    if (Math.random() < 0.12) { const s2 = choose(F5.hurt); this.bark(s2, Math.max(1.2, s2.length * 0.07)); }
   }
 
   /** host: a swing knocks a thrown sword back at him */
@@ -1392,7 +1416,7 @@ export class Midnight3 implements Boss3Like, Netted {
       if (!show) { this.handTele[i].hide(); this.handBand[i].hide(); return; }
       r.root.position.copy(h.pos);
       r.root.rotation.y = h.act === 'reach' ? h.yaw : Math.atan2(PASTILA_AT.x - h.pos.x, PASTILA_AT.z - h.pos.z);
-      r.update(dt, h.act === 'slam' ? 1 : h.act === 'snatch' ? 2 : 0, h.act === 'recoil' ? 0.3 : 0);
+      r.update(dt, h.act === 'slam' ? 1 : h.act === 'snatch' || h.act === 'held' ? 2 : 0, h.act === 'recoil' ? 0.3 : 0);
       this.giant.shoulders[i].getWorldPosition(tmp);
       r.setArm(tmp, tmp2.copy(h.pos).setY(h.pos.y + 0.4));
       // telegraphs: the band to the cannon, the ring under a slam
@@ -1401,6 +1425,18 @@ export class Midnight3 implements Boss3Like, Netted {
       if (h.act === 'slam' && h.at < h.w + 0.2) this.handTele[i].show(h.tx, ROOF.y, h.tz, 2.6, clamp(h.at / h.w, 0, 1), h.at > h.w * 0.72, this.t);
       else this.handTele[i].hide();
     });
+    // (v2) Ноки's shadow pulling a hand back from the cannon
+    const held = this.hands.find((h) => h.on && h.act === 'held' && (this.state === 'shadow' || this.state === 'shot'));
+    const gm = this.girlHold.material as THREE.MeshBasicMaterial;
+    gm.opacity = Math.max(0, Math.min(0.92, gm.opacity + (held ? dt * 3 : -dt * 2)));
+    this.girlHold.visible = gm.opacity > 0.01;
+    if (held) {
+      tmp.set(PASTILA_AT.x - held.pos.x, 0, PASTILA_AT.z - held.pos.z).normalize();
+      this.girlHold.position.set(held.pos.x + tmp.x * 0.85, ROOF.y + 0.02, held.pos.z + tmp.z * 0.85);
+      const cam = L.tcam.cam.position;
+      this.girlHold.rotation.set(0, Math.atan2(cam.x - this.girlHold.position.x, cam.z - this.girlHold.position.z), Math.sin(this.t * 9) * 0.06 - 0.12);
+      if (Math.random() < 0.3) ambient(L, () => L.fx.emit(this.girlHold.position.clone().setY(ROOF.y + 1), { count: 1, speed: [0.3, 1], life: [0.5, 0.9], size: [0.15, 0.3], colors: ['#b890ff', '#ffffff'], g: -1, drag: 1 }));
+    }
     // the beams
     const bl = this.beamList();
     this.beamMeshes.forEach((mesh, i) => {

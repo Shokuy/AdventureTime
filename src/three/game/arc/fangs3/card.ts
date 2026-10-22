@@ -4,15 +4,16 @@ import { audio } from '../../../../engine/audio';
 import { rrect, text, wrap, OUT } from '../../../../art/draw';
 import type { Waiter } from '../../../../game/coroutine';
 import type { Level3D } from '../../level';
-import { CARD } from './lines';
+import { CARD, PAGE } from './lines';
 
 /**
  * The ingredient card «Корень полуденника» (docs/script-fangs.md §10) — a compact card at the bottom like the item
  * cards of the prologue, with the root drawn on it. Solo: closes on a press (or after a while); co-op: by itself after
  * a few seconds, so the shared scene doesn't wait for the slowest reader.
  */
-export function showCard(L: Level3D): Waiter {
+export function showCard(L: Level3D, which: 'root' | 'page' = 'root'): Waiter {
   let t = 0, closing = -1;
+  const C = which === 'page' ? PAGE : CARD;
   const draw = (ctx: CanvasRenderingContext2D) => {
     const k = closing >= 0 ? clamp(1 - closing * 4, 0, 1) : 1;
     const a = ease.outBack(clamp(t * 3, 0, 1)) * k;
@@ -27,16 +28,16 @@ export function showCard(L: Level3D): Waiter {
     rrect(ctx, -w / 2 + 6, -h / 2 + 8, w, h, 26, 'rgba(0,0,0,0.3)', 0);
     rrect(ctx, -w / 2, -h / 2, w, h, 26, '#fff7e6', 5);
     rrect(ctx, -w / 2 + 22, -h / 2 - 22, 300, 44, 18, '#ffd34a', 4);
-    text(ctx, 'ИНГРЕДИЕНТ 2 ИЗ 3', -w / 2 + 172, -h / 2 + 8, { size: 22, color: OUT, align: 'center' });
+    text(ctx, which === 'page' ? 'НАХОДКА' : 'ИНГРЕДИЕНТ 2 ИЗ 3', -w / 2 + 172, -h / 2 + 8, { size: 22, color: OUT, align: 'center' });
     // the root: a warm glow, a knobbly golden root with a sprout
     const ix = -w / 2 + 96, iy = 10 + Math.sin(t * 3) * 3;
     const gl = ctx.createRadialGradient(ix, iy, 0, ix, iy, 70);
     gl.addColorStop(0, 'rgba(255,230,140,0.9)'); gl.addColorStop(1, 'rgba(255,200,80,0)');
     ctx.fillStyle = gl; ctx.fillRect(ix - 70, iy - 70, 140, 140);
-    drawRoot(ctx, ix, iy, 1, t);
-    text(ctx, CARD.title, -w / 2 + 190, -26, { size: 34, color: '#b0453a' });
+    if (which === 'page') drawPage(ctx, ix, iy, 1, t); else drawRoot(ctx, ix, iy, 1, t);
+    text(ctx, C.title, -w / 2 + 190, -26, { size: 34, color: '#b0453a' });
     ctx.font = '400 21px Pangolin, sans-serif';
-    const lines = wrap(ctx, CARD.desc, w - 220);
+    const lines = wrap(ctx, C.desc, w - 220);
     lines.forEach((l, i) => text(ctx, l, -w / 2 + 192, 12 + i * 26, { size: 21, font: 'body', color: OUT }));
     if (!L.nl && t > 0.8) text(ctx, 'Пробел / Enter', w / 2 - 22, h / 2 - 16, { size: 15, color: '#8a6a4a', align: 'right', alpha: 0.6 + Math.sin(t * 5) * 0.3 });
     ctx.restore();
@@ -83,5 +84,26 @@ export function drawRoot(ctx: CanvasRenderingContext2D, x: number, y: number, s:
   ctx.beginPath(); ctx.arc(4, -54, 7, 0, Math.PI * 2); ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = OUT; ctx.stroke();
   ctx.strokeStyle = 'rgba(255,220,90,0.9)'; ctx.lineWidth = 2;
   for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2 + t; ctx.beginPath(); ctx.moveTo(4 + Math.cos(a) * 10, -54 + Math.sin(a) * 10); ctx.lineTo(4 + Math.cos(a) * 14, -54 + Math.sin(a) * 14); ctx.stroke(); }
+  ctx.restore();
+}
+
+/** Карамель's diary page: yellowed, folded in four, a few lines of handwriting and a little watering can drawn in */
+export function drawPage(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, t: number) {
+  ctx.save();
+  ctx.translate(x, y); ctx.scale(s, s); ctx.rotate(-0.12 + Math.sin(t * 2) * 0.03);
+  ctx.lineJoin = 'round';
+  ctx.fillStyle = '#f2dea4'; ctx.strokeStyle = OUT; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.moveTo(-34, -44); ctx.lineTo(30, -46); ctx.lineTo(36, 42); ctx.lineTo(-30, 46); ctx.closePath(); ctx.fill(); ctx.stroke();
+  // the folds
+  ctx.strokeStyle = 'rgba(160,120,60,0.55)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(-32, 1); ctx.lineTo(33, -2); ctx.moveTo(-2, -45); ctx.lineTo(3, 44); ctx.stroke();
+  // handwriting
+  ctx.strokeStyle = '#8a5a2a'; ctx.lineWidth = 2;
+  for (let i = 0; i < 5; i++) { const yy = -34 + i * 9; ctx.beginPath(); ctx.moveTo(-26, yy); for (let k = 0; k < 6; k++) ctx.lineTo(-26 + k * 9 + 4, yy + (k % 2 ? -2 : 2)); ctx.stroke(); }
+  // a tiny watering can doodle and a heart
+  ctx.strokeStyle = '#5a7a6a'; ctx.lineWidth = 2.5;
+  ctx.strokeRect(-24, 14, 16, 14); ctx.beginPath(); ctx.moveTo(-8, 18); ctx.lineTo(4, 10); ctx.stroke();
+  ctx.fillStyle = '#e8508a'; ctx.beginPath(); ctx.arc(14, 26, 4, 0, Math.PI * 2); ctx.arc(21, 26, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(10, 28); ctx.lineTo(17.5, 36); ctx.lineTo(25, 28); ctx.fill();
   ctx.restore();
 }

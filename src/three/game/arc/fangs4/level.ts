@@ -12,7 +12,7 @@ import { CrumbleBridge } from './bridge';
 import { Wind } from './wind';
 import { BatSwarm } from './swarm';
 import { Twins } from './twins';
-import { createSunStone, createFarCastle, type SunStone } from './models';
+import { createSunStone, createFarCastle, createKingdomLights, type SunStone } from './models';
 import { LINES4 } from './lines';
 import './goat';
 
@@ -36,6 +36,10 @@ import './goat';
 export const F4 = {
   /** the summit arena */
   C: new THREE.Vector3(0, 20, -394), R: 15,
+  /** the Пастильное королевство far below in the east (8.8 К7: its lights go out) */
+  kingdom: new THREE.Vector3(185, -28, -398),
+  /** the castle on the horizon */
+  castle: new THREE.Vector3(40, 30, -760),
   /** the campfire */
   fire: new THREE.Vector3(6, 20, -405),
   ravine: { z0: -214, zCave: -300, top: 20.8 },
@@ -44,6 +48,8 @@ export const F4 = {
 
 export interface F4Refs {
   wind: Wind; bridges: CrumbleBridge[]; swarm: BatSwarm; twins: Twins; stone: SunStone; fire: Campfire;
+  /** the kingdom's lights far below: 0 lit … 1 dark (8.8 К7) */
+  kingdom: { root: THREE.Group; out(k: number, t: number): void }; kingdomOut: number;
   /** the stone's glow 0..1 (scripts tween it; the level animates the blink) */
   stoneK: number;
 }
@@ -58,7 +64,8 @@ export function fangs4Pass(): Level3Def {
     spawn: [0, 0, 7], yaw: Math.PI, killY: -42,
     bg: '#2a0d20', fog: ['#3a1028', 45, 190],
     hemi: ['#d07890', '#2c1022', 0.9], sun: { color: '#ff9e9e', intensity: 1.3, dir: [0.05, 0.42, -1] },
-    startScript: 'fangs4_intro',
+    // v2: the cold open on the summit (8.0) comes first, then the banner, then 8.1
+    startScript: 'fangs4_cold',
     castScenes: true,
     fallLimit: 9.5,
     deathText: LINES4.death.wind,
@@ -72,8 +79,13 @@ function build(L: Level3D) {
   Vk.moon({ size: 36 });
   farMountains(L, 0, -200);
   const castle = createFarCastle();
-  castle.position.set(40, 30, -760);
+  castle.position.copy(F4.castle);
   L.deco(castle);
+  // the Пастильное королевство far below in the east: warm little lights (they go out in 8.8)
+  const kingdom = createKingdomLights(glowTex());
+  kingdom.root.position.copy(F4.kingdom);
+  L.deco(kingdom.root);
+  kingdom.out(0, 0);
 
   // ═════════════ A — the foot of the pass ═════════════
   slab(L, -9, 9, 14, -28, 0, { edges: true });
@@ -121,6 +133,8 @@ function build(L: Level3D) {
   slab(L, -3, 3, -75, -79, 0, { depth: 40 });
   const b2 = new CrumbleBridge(L, 'step', 0, -64, -75, 0, 2.6, { id: 94102, sag: 0.35 });
   const b3 = new CrumbleBridge(L, 'step', 0, -79, -90, 0, 2.6, { id: 94103, sag: 0.35 });
+  // v2 8.2.4: the sisters' voices from the summit, carried by the wind — on the bridge, in the cave, at the stairs
+  L.trigger(-3, -3, -67.5, 3, 5, -64, 'fangs4_v_bridge');
   // the old concrete beam (east), a jump in the middle
   concrete(L, 6.9, -2.2, -70.5, 1.4, 1.0, 12, { rebar: true });
   concrete(L, 6.9, -2.2, -84.5, 1.4, 1.0, 10, { rebar: true });
@@ -241,6 +255,7 @@ function build(L: Level3D) {
   cliff(L, -3.5, -1.9, -299.5, -301.5, YR, YR + 5);
   cliff(L, 1.9, 3.5, -299.5, -301.5, YR, YR + 5);
   L.cp(-1.5, YR, -311);
+  L.trigger(-3, YR - 1, -306, 3, YR + 5, -301.5, 'fangs4_v_cave');
   Vk.lantern(1.9, YR, -308, { r: 4.5, h: 2.0 });
   // the ruins
   slab(L, -18, 18, -318, -344, YR, { edges: true });
@@ -263,6 +278,8 @@ function build(L: Level3D) {
   Vk.flock(0, YR + 4.5, -336, 3);
   L.crumbLine(-2, YR, -320, 2, YR, -342, 5);
   L.trigger(-18, YR - 1, -322, 18, YR + 6, -318.5, 'fangs4_ruins');
+  // v2 8.2.3: Бублик at «ОСТ_НОВКА»
+  L.trigger(-17, YR - 1, -331, -4.5, YR + 6, -320, 'fangs4_stop');
   // the courtyard (the only way on): broken walls, an ambush ring, «ВЫХ_Д»
   slab(L, -9, 9, -344, -363, YR);
   cliff(L, -18, -9, -344, -372, YR - 20, 30);
@@ -284,6 +301,7 @@ function build(L: Level3D) {
   cliff(L, -18, -4, -363, -380, YR, 26);
   cliff(L, 4, 18, -363, -380, YR, 26);
   L.cp(-2.4, 20, -377);
+  L.trigger(-4, YR - 1, -366, 4, YR + 8, -362.5, 'fangs4_v_stairs');
   L.pick('heart', 2.4, 20.4, -377.5);
   // the summit disc
   const C = F4.C;
@@ -305,7 +323,9 @@ function build(L: Level3D) {
   const stone = createSunStone(glowTex());
   stone.root.position.copy(C);
   L.deco(stone.root);
-  L.col({ kind: 'box', min: V(C.x - 0.95, C.y, C.z - 0.9), max: V(C.x + 0.95, C.y + 3.0, C.z + 0.9) });
+  L.col({ kind: 'box', min: V(C.x - 0.85, C.y, C.z - 0.9), max: V(C.x + 0.85, C.y + 3.7, C.z + 0.9) });
+  // two wind flags on the rim (the cold open's first shot)
+  wind.flags.push(windFlag(L, -10.2, C.y, C.z + 4.5, '#7a4cff'), windFlag(L, 10.6, C.y, C.z + 3.2, '#ff6ad8'));
   L.signAt(C.x, C.y, C.z + 1.9, LINES4.signs.stone);
   Vk.greyZone('summit', [C.x, C.y, C.z], 19, { auto: 'none' });
   L.trigger(-5, C.y - 2, -381.5, 5, C.y + 6, -379.2, 'fangs4_boss_intro');
@@ -334,10 +354,16 @@ function build(L: Level3D) {
   L.actors.push(climbers);
 
   const twins = new Twins(L, C, F4.R);
-  const refs: F4Refs = { wind, bridges: [b1, b2, b3], swarm, twins, stone, fire, stoneK: 0 };
+  const refs: F4Refs = { wind, bridges: [b1, b2, b3], swarm, twins, stone, fire, stoneK: 0, kingdom, kingdomOut: 0 };
   L.refs.f4 = refs;
-  // the stone blinks yellow once it glows («мигал жёлтым, чтобы все были осторожны»)
-  L.updaters.push((t) => { const k = refs.stoneK; stone.set(k, k > 0 ? (Math.sin(t * 3.2) > 0 ? 1 : 0.35) : 0); });
+  // the stone blinks yellow once it glows («мигал жёлтым, чтобы все были осторожны»); in the twins' third phase it
+  // runs its old traffic-light cycle (twins.signal, on the room clock)
+  L.updaters.push((t) => {
+    if (twins.signal !== 'off') { stone.signal(twins.signal, Math.sin(t * 18) > -0.3 ? 1 : 0.2); return; }
+    const k = refs.stoneK; stone.set(k, k > 0 ? (Math.sin(t * 3.2) > 0 ? 1 : 0.35) : 0);
+  });
+  let kOut = -1;
+  L.updaters.push((t) => { if (refs.kingdomOut !== kOut || refs.kingdomOut < 1) { kOut = refs.kingdomOut; kingdom.out(kOut, t); } });
 }
 
 /** one rock step of the climb (a pillar from `base` up to `top`) */

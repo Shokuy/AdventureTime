@@ -14,7 +14,7 @@ import type { Level3D, Boss3Like, HeroLike, Actor3 } from '../../level';
 import type { Netted } from '../../netLevel';
 import type { RemoteHero3 } from '../../remoteHero';
 import { ambient, markCharacter, GroundMark } from '../vampires';
-import { createSister, SISTER_COLOR, type SisterKind, type SisterRig, type SisterAnim } from './models';
+import { createSister, createTether, SISTER_COLOR, SIGNAL_COLOR, type SisterKind, type SisterRig, type SisterAnim, type Signal, type Tether } from './models';
 import { LINES4 } from './lines';
 import { talkers } from './speech';
 import { cast, mark, faceTo, hideCast, type CastKind } from './cast';
@@ -31,7 +31,13 @@ import { cast, mark, faceTo, hideCast, type CastKind } from './cast';
  *  • THE RHYTHM: watch (gaze marks: stand in a gaze too long and shadow spikes erupt under you, ring first) → sometimes
  *    a combined attack (both dash at the heroes they watch along lit lanes; phase 2: two shadow rings to jump) → SWAP
  *    («Меняемся!»: they vanish and reappear in each other's place) → BLIND for a moment (hands over the eyes, no gaze —
- *    both open to everyone) → watch again. Phase 2 (half health): the quarrel, faster gazes, more combos.
+ *    both open to everyone) → watch again. Phase 2 «Ссора» (half health): faster gazes, more combos, and they quarrel
+ *    out loud — on every line of the quarrel (1.2 s) both look at each other, their gazes go out (v2 §8.4).
+ *  • PHASE 3 «СВЕТОФОР» (20 % left, v2 §8.4): the sisters wake the stone to blind the heroes, but the old traffic light
+ *    runs its own cycle on the room clock: GREEN 4 s — they dash along lit lanes at double speed, one dash after
+ *    another; YELLOW 1 s — it blinks, `warn`; RED 3 s — «Красный! Стоим!»: both freeze, gazes off, every hit stays
+ *    (no healing back). Dodge on green, hit both on red.
+ *  • THE RIBBON: one ribbon ties their hair (an arch over the stone when they stand apart); it snaps in the defeat.
  *  • SOLO: the story cast helps (GDD §8): Бублик (Тоша when you play Бублик) distracts the guarding sister every
  *    watch («Эй, тётя! Смотри, какой я длинный!»), Тоша calls the opening, Ноки warns about the wrong one, Пастила
  *    slows a gaze with syrup. The swap then puts the other sister right next to you, blind: hit her — both wounds stay.
@@ -44,9 +50,9 @@ import { cast, mark, faceTo, hideCast, type CastKind } from './cast';
  */
 
 const NET_ID = 94140;
-const ACTS = ['idle', 'walk', 'mark', 'dashPrep', 'dash', 'swapOut', 'swapIn', 'blind', 'hurt', 'down', 'talk'] as const;
+const ACTS = ['idle', 'walk', 'mark', 'dashPrep', 'dash', 'swapOut', 'swapIn', 'blind', 'hurt', 'down', 'talk', 'freeze', 'kneel', 'laugh'] as const;
 type Act = (typeof ACTS)[number];
-const MODES = ['intro', 'watch', 'combo', 'swap', 'blind', 'alone', 'dead'] as const;
+const MODES = ['intro', 'watch', 'combo', 'swap', 'blind', 'alone', 'wake', 'light', 'dead'] as const;
 type Mode = (typeof MODES)[number];
 
 const HALF = 0.46;        // gaze cone half angle
@@ -54,6 +60,11 @@ const GAZE_LEN = 30;
 const SELF_R = 5;
 const RING = 6;           // the sisters' circle around the stone
 const SCALE = 1.3;
+/** «Светофор»: green 4 s · yellow 1 s · red 3 s (v2 §8.4) */
+const GREEN = 4, YELLOW = 1, RED = 3, CYCLE = GREEN + YELLOW + RED;
+const DASH_V = 24;
+/** the light at time u of the cycle */
+const lightAt = (u: number): Signal => { const k = ((u % CYCLE) + CYCLE) % CYCLE; return k < GREEN ? 'green' : k < GREEN + YELLOW ? 'yellow' : 'red'; };
 const pose: NetPose = { pos: new THREE.Vector3(), vel: new THREE.Vector3(), yaw: 0 };
 const v1 = new THREE.Vector3(), v2 = new THREE.Vector3();
 const wrapA = (a: number) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -67,6 +78,8 @@ interface Sis {
   target: HeroLike | null; watchT: number; markCD: number;
   distractT: number; distractAt: THREE.Vector3; slowT: number; stunT: number;
   talk: number; flash: number; vanish: number; down: boolean; spiked: boolean; hidden: boolean;
+  /** phase 2: quarrelling right now (a line of the quarrel) */
+  argue: boolean;
   dashTo: THREE.Vector3; dashFrom: THREE.Vector3;
   hitIds: Set<number>;
   cone: THREE.Mesh; coneM: THREE.MeshBasicMaterial; lane: THREE.Mesh; laneM: THREE.MeshBasicMaterial;
@@ -103,12 +116,36 @@ export class Twins implements Boss3Like, Netted, Actor3 {
   private hudK = 0;
   private won = false;
   private spikes: Spike[] = [];
+  /** phase 2: how long both still look at each other (a quarrel line) */
+  private argueT = 0;
+  private argued = -1;
+  private quarrelQ: [SisterKind, string][] = [];
+  /** phase 3: the room-clock time the stone's cycle started (−1: not yet); replicated */
+  lightT0 = -1;
+  /** what the stone shows now (every machine computes it from lightT0) */
+  signal: Signal = 'off';
+  private lastSignal: Signal = 'off';
+  private redN = 0;
+  /** the one ribbon in their hair */
+  readonly tether: Tether;
+  private readonly kA = new THREE.Vector3();
+  private readonly kB = new THREE.Vector3();
+  /** a coloured light on the arena floor in phase 3 (what the stone shows) */
+  private floor: THREE.Mesh;
+  private floorM: THREE.MeshBasicMaterial;
   constructor(private L: Level3D, readonly C: THREE.Vector3, readonly R: number) {
     const party = L.nl ? coop.hpScale() : 1;
     const base = (L.nl ? coop.easy : save.data.settings.easy) ? 16 : 22;
     const hp = Math.round(base * party);
     this.linkT = L.nl ? 4.2 : 7;
     this.sis = [this.makeSis(0, 'nochka', hp), this.makeSis(1, 'tenka', hp)];
+    this.tether = createTether();
+    L.scene.add(this.tether.root);
+    this.floorM = basic('#ffffff', { additive: true, opacity: 0, depthWrite: false });
+    this.floorM.polygonOffset = true; this.floorM.polygonOffsetFactor = -3;
+    this.floor = new THREE.Mesh(new THREE.CircleGeometry(R - 0.6, 40).rotateX(-Math.PI / 2), this.floorM);
+    this.floor.position.set(C.x, C.y + 0.05, C.z); this.floor.renderOrder = 2; noOutline(this.floor); this.floor.visible = false;
+    L.scene.add(this.floor);
     this.place();
     talkers.set(L, (who) => { this.sis[who === 'nochka' ? 0 : 1].talk = 0.35; });
     L.actors.push(this);
@@ -142,20 +179,24 @@ export class Twins implements Boss3Like, Netted, Actor3 {
       hp, maxHp: hp, fresh: 0, freshT: 0,
       act: 'idle', actT: 0, actMax: 1, target: null, watchT: 0, markCD: 2,
       distractT: 0, distractAt: new THREE.Vector3(), slowT: 0, stunT: 0,
-      talk: 0, flash: 0, vanish: 0, down: false, spiked: false, hidden: false,
+      talk: 0, flash: 0, vanish: 0, down: false, spiked: false, hidden: false, argue: false,
       dashTo: new THREE.Vector3(), dashFrom: new THREE.Vector3(), hitIds: new Set(),
       cone, coneM, lane, laneM, tp: 0, track: null,
     };
   }
 
-  /** stand back to back at the stone (the intro pose): Ночка looks left (−X), Тенька right (+X) */
-  place() {
+  /** stand back to back 2.5 m in front of the stone (the cold open / intro pose): Ночка looks west (−X), Тенька east */
+  place(dz = 2.5, act: Act = 'idle') {
     const [a, b] = this.sis;
-    a.pos.set(this.C.x - 0.9, this.C.y, this.C.z + 2.2); a.yaw = -Math.PI / 2; a.gaze = a.yaw;
-    b.pos.set(this.C.x + 0.9, this.C.y, this.C.z + 2.2); b.yaw = Math.PI / 2; b.gaze = b.yaw;
+    a.pos.set(this.C.x - 0.62, this.C.y, this.C.z + dz); a.yaw = -Math.PI / 2; a.gaze = a.yaw;
+    b.pos.set(this.C.x + 0.62, this.C.y, this.C.z + dz); b.yaw = Math.PI / 2; b.gaze = b.yaw;
     this.theta = Math.PI;
-    for (const s of this.sis) this.sync(s, 0);
+    for (const s of this.sis) { s.hidden = false; s.vanish = 0; s.act = act; s.actT = 0; s.actMax = 1; this.sync(s, 0); }
   }
+  /** cutscenes: a sister's pose (every machine stages it the same) */
+  pose(k: SisterKind, act: Act, yaw?: number) { const s = this.sister(k); s.act = act; s.actT = 0; s.actMax = 1; if (yaw !== undefined) { s.yaw = yaw; s.gaze = yaw; } }
+  /** cutscenes: a sister's mouth moves */
+  talkNow(k: SisterKind) { this.sister(k).talk = 0.35; }
 
   /** host / solo: the fight begins (after the intro scene) */
   start() {
@@ -193,6 +234,7 @@ export class Twins implements Boss3Like, Netted, Actor3 {
       this.host(L, dt);
     } else { this.puppet(L, dt); this.wasPuppet = true; }
     for (const s of this.sis) this.sync(s, dt);
+    this.lights(L, dt);
     this.spikes = this.spikes.filter((k) => !k.update(L));
     if (this.fighting) this.dashHitMine(L);
     this.hudK = damp(this.hudK, this.fighting && L.letterbox < 0.3 ? 1 : 0, 6, dt);
@@ -213,19 +255,31 @@ export class Twins implements Boss3Like, Netted, Actor3 {
       if (s.act === 'hurt' && s.actT >= s.actMax) this.go(s, 'idle');
       if (this.mode === 'alone' && !s.down && (s.act === 'blind' || s.act === 'swapOut' || s.act === 'swapIn')) this.go(s, 'idle');
     }
-    // the quarrel (phase 2): four lines, one every 1.4 s
+    // the quarrel (phase 2): its lines one every 1.4 s; on each line both look at each other for 1.2 s
+    this.argueT -= dt;
     if (this.quarrelT >= 0) {
       this.quarrelT += dt;
-      const q = LINES4.quarrel;
-      if (this.quarrelI < q.length && this.quarrelT >= this.quarrelI * 1.4) { const [w, s] = q[this.quarrelI++]; this.say(L, this.sis[w === 'nochka' ? 0 : 1], s, 1.3); }
+      const q = this.quarrelQ;
+      if (this.quarrelI < q.length && this.quarrelT >= this.quarrelI * 1.4) {
+        const [w, line] = q[this.quarrelI++];
+        if (this.sis.every((x) => !x.down) && this.phase === 2) { this.say(L, this.sister(w), line, 1.3); this.argueT = 1.2; }
+      }
       if (this.quarrelI >= q.length) this.quarrelT = -1;
     }
+    const arguing = this.argueT > 0 && this.phase === 2;
+    for (const s of this.sis) s.argue = arguing && !s.down && (s.act === 'idle' || s.act === 'walk' || s.act === 'talk' || s.act === 'mark');
     const spd = this.phase === 2 ? 1.25 : 1;
     switch (this.mode) {
       case 'watch': {
         const dur = (this.phase === 2 ? 5.2 : 6.5) / (L.nl ? 1 + 0.06 * (L.heroes().length - 1) : 1);
         for (const s of this.sis) { if (s.act === 'idle' || s.act === 'walk' || s.act === 'talk') this.drift(s, dt); this.watch(L, s, hs, dt); }
         if (!L.nl) this.soloHelp(L, hs, dt);
+        // phase 2: a short spat in every watch (two lines of the quarrel, in turn)
+        if (this.phase === 2 && this.quarrelT < 0 && this.argued !== this.cycle && this.modeT > 1.6 && this.sis.every((x) => !x.down)) {
+          this.argued = this.cycle;
+          const q = LINES4.quarrel, k = (this.cycle % 2) * 2;
+          this.quarrel([q[k], q[k + 1]]);
+        }
         if (this.modeT > dur && this.sis.every((s) => s.act !== 'mark')) {
           const combo = this.phase === 2 || this.cycle % 2 === 1;
           if (combo) this.startCombo(L, hs); else this.startSwap(L);
@@ -238,6 +292,8 @@ export class Twins implements Boss3Like, Netted, Actor3 {
         for (const s of this.sis) { s.gazeOn = damp(s.gazeOn, 0, 10, dt); this.drift(s, dt); }
         if (this.modeT > (L.nl ? 2.3 : 3.0) / spd) { this.mode = 'watch'; this.modeT = 0; this.cycle++; for (const s of this.sis) if (!s.down) this.go(s, 'idle'); }
         break;
+      case 'wake': this.wake(L, dt); break;
+      case 'light': this.light(L, hs, dt); break;
       case 'alone': {
         const s = this.sis.find((x) => !x.down)!;
         if (s.act === 'idle' || s.act === 'walk') this.drift(s, dt);
@@ -246,6 +302,102 @@ export class Twins implements Boss3Like, Netted, Actor3 {
         else if (this.modeT > 4.5 && s.act !== 'mark') { this.modeT = 0; this.prepDash(L, s, hs); }
         break;
       }
+    }
+    // quarrelling: both gazes go out (they look at each other, not at you)
+    if (arguing) for (const s of this.sis) if (!s.down) { s.gazeOn = damp(s.gazeOn, 0, 16, dt); const t = this.twin(s); s.gaze += clamp(wrapA(Math.atan2(t.pos.x - s.pos.x, t.pos.z - s.pos.z) - s.gaze), -6 * dt, 6 * dt); }
+  }
+
+  /** queue quarrel lines (host) */
+  private quarrel(lines: [SisterKind, string][]) { this.quarrelQ = lines; this.quarrelT = 0; this.quarrelI = 0; }
+
+  // ───────── phase 3: «Светофор» ─────────
+  /** host: 20 % left — the sisters run to the stone and wake it */
+  private startLights(L: Level3D) {
+    this.phase = 3; this.mode = 'wake'; this.modeT = 0;
+    this.quarrelT = -1; this.argueT = 0;
+    for (const k of this.spikes) k.cancel();
+    this.spikes = [];
+    for (const s of this.sis) if (!s.down) { this.go(s, 'walk'); s.fresh = 0; s.freshT = 0; }
+    L.hud.showBanner(LINES4.light.banner, '#ffd34a');
+    audio.sfx('alert', { pitch: 0.8 });
+  }
+  private wake(L: Level3D, dt: number) {
+    for (const s of this.sis) {
+      if (s.down) continue;
+      // each to her side of the stone, a hand on it
+      const to = v1.set(this.C.x + (s.i === 0 ? -1.4 : 1.4), this.C.y, this.C.z + 1.3);
+      s.pos.lerp(to, Math.min(1, dt * 4));
+      s.gazeOn = damp(s.gazeOn, 0, 8, dt);
+      s.yaw += clamp(wrapA(Math.atan2(this.C.x - s.pos.x, this.C.z - s.pos.z) - s.yaw), -6 * dt, 6 * dt); s.gaze = s.yaw;
+      if (this.modeT > 0.9 && s.act !== 'mark') this.go(s, 'mark', 0.8);
+    }
+    if (this.modeT >= 1.5) {
+      // the stone wakes: the cycle starts on yellow (then red: the first lesson is the good one)
+      this.mode = 'light'; this.modeT = 0;
+      this.lightT0 = clk(L) - GREEN;
+      for (const s of this.sis) if (!s.down) this.go(s, 'idle');
+      this.theta = Math.atan2(this.sis[0].pos.z - this.C.z, this.sis[0].pos.x - this.C.x);
+      ambient(L, () => { L.whiteFlash = 0.5; L.tcam.shake(0.3); });
+      audio.sfx('artifact', { pitch: 0.6 });
+      this.hintOnce(L, 'light', LINES4.light.toast);
+    }
+  }
+  private light(L: Level3D, hs: HeroLike[], dt: number) {
+    const sig = this.signal;
+    for (const s of this.sis) {
+      if (s.down) continue;
+      s.markCD = 99;
+      if (sig === 'red') {
+        // «Красный — стоим!»: freeze where she is, the gaze goes out
+        if (s.act !== 'freeze' && s.act !== 'hurt') this.go(s, 'freeze', 99);
+        if (s.act === 'hurt' && s.actT >= s.actMax) this.go(s, 'freeze', 99);
+        s.gazeOn = damp(s.gazeOn, 0, 14, dt);
+        continue;
+      }
+      if (s.act === 'freeze') this.go(s, 'idle');
+      this.watch(L, s, hs, dt);
+      if (sig === 'green') {
+        s.gazeOn = damp(s.gazeOn, 0.6, 4, dt);
+        if (s.act === 'dashPrep' || s.act === 'dash') this.dashStep(L, s, dt);
+        else if ((s.act === 'idle' || s.act === 'walk') && s.actT > 0.15) this.prepDash(L, s, hs, 0.55);
+      } else {
+        // yellow: no new dash; one already running ends
+        if (s.act === 'dash' || s.act === 'dashPrep') this.dashStep(L, s, dt);
+        if (s.act === 'dashPrep') this.go(s, 'idle');
+      }
+    }
+    // the stone's lines (host barks, every machine hears them)
+    if (sig !== this.lastSignal) {
+      const live = (k: SisterKind) => !this.sister(k).down;
+      const say = ([w, line]: [SisterKind, string], d = 1.3) => { const s = live(w) ? this.sister(w) : this.sis.find((x) => !x.down); if (s) this.say(L, s, line, d); };
+      if (sig === 'green') say(LINES4.light.green);
+      else if (sig === 'yellow') say(LINES4.light.yellow);
+      else if (sig === 'red') {
+        this.redN++;
+        say(LINES4.light.red[0], 1.4);
+        if (this.redN % 2 === 1) this.later(1.3, () => { if (this.signal === 'red' && this.fighting) say(LINES4.light.red[1], 1.6); });
+        // solo: a friend calls it (Пастила; Тоша when you play her) — the first reds
+        const caller = this.helpers.find((h) => h.kind === 'pastila') ?? this.helpers.find((h) => h.kind === 'tosha');
+        if (!L.nl && caller && this.redN <= 3) this.later(0.4, () => this.castSay(L, caller.kind, LINES4.help.red));
+      }
+    }
+  }
+  /** every machine: what the stone shows (from the replicated start), its sounds, the floor's colour */
+  private lights(L: Level3D, dt: number) {
+    const on = this.phase === 3 && this.lightT0 >= 0 && this.mode === 'light';
+    const sig: Signal = on ? lightAt(clk(L) - this.lightT0) : 'off';
+    if (sig !== this.signal) {
+      if (sig === 'yellow') ambient(L, () => audio.sfx('warn'));
+      else if (sig === 'red') ambient(L, () => { audio.sfx('clang', { pitch: 0.6, volume: 0.7 }); L.tcam.shake(0.15); });
+      else if (sig === 'green') ambient(L, () => audio.sfx('whoosh', { pitch: 0.7 }));
+    }
+    if (L.authority) this.lastSignal = this.signal;
+    this.signal = sig;
+    this.floor.visible = sig !== 'off';
+    if (this.floor.visible) {
+      this.floorM.color.set(SIGNAL_COLOR[sig as Exclude<Signal, 'off'>]);
+      const blink = sig === 'yellow' ? (Math.sin(L.t * 18) > 0 ? 1 : 0.3) : 1;
+      this.floorM.opacity = damp(this.floorM.opacity, (sig === 'red' ? 0.16 : 0.1) * blink, 10, dt);
     }
   }
 
@@ -329,7 +481,7 @@ export class Twins implements Boss3Like, Netted, Actor3 {
       this.say(L, this.sis[0], LINES4.nochka[3], 1.4);
     }
   }
-  private prepDash(L: Level3D, s: Sis, hs: HeroLike[]) {
+  private prepDash(L: Level3D, s: Sis, hs: HeroLike[], prep?: number) {
     const tgt = s.target && hs.includes(s.target) ? s.target : hs[0];
     const aim = tgt ? tgt.pos.clone() : this.C.clone().add(v2.set(rand(-4, 4), 0, rand(-4, 4)));
     const dir = aim.sub(s.pos).setY(0);
@@ -342,11 +494,12 @@ export class Twins implements Boss3Like, Netted, Actor3 {
     s.dashFrom.copy(s.pos);
     s.dashTo.copy(s.pos).addScaledVector(dir, len);
     s.yaw = s.gaze = Math.atan2(dir.x, dir.z);
-    this.go(s, 'dashPrep', this.phase === 2 ? 0.9 : 1.1);
+    this.go(s, 'dashPrep', prep ?? (this.phase === 2 ? 0.9 : 1.1));
   }
   /** a dash step (host): prep → dash → idle */
   private dashStep(L: Level3D, s: Sis, dt: number) {
-    if (s.act === 'dashPrep' && s.actT >= s.actMax) { this.go(s, 'dash', s.dashFrom.distanceTo(s.dashTo) / 24); audio.sfx('whoosh', { pitch: 0.8 }); }
+    // (green light: twice as fast)
+    if (s.act === 'dashPrep' && s.actT >= s.actMax) { this.go(s, 'dash', s.dashFrom.distanceTo(s.dashTo) / (DASH_V * (this.signal === 'green' ? 2 : 1))); audio.sfx('whoosh', { pitch: this.signal === 'green' ? 1.1 : 0.8 }); }
     else if (s.act === 'dash') {
       const u = clamp(s.actT / s.actMax, 0, 1);
       s.pos.lerpVectors(s.dashFrom, s.dashTo, u);
@@ -518,13 +671,14 @@ export class Twins implements Boss3Like, Netted, Actor3 {
     L.fx.text(at.clone().setY(at.y + 1.3), String(n), '#ffe14a', 28);
     L.fx.sparks(at.clone(), 12);
     const t = this.twin(s);
-    if (t.down) { s.fresh = 0; s.freshT = 0; }
+    // (red light: every wound stays — no healing back)
+    if (t.down || this.signal === 'red') { s.fresh = 0; s.freshT = 0; }
     else {
       s.fresh += real; s.freshT = this.linkT;
       if (t.fresh > 0 && t.freshT > 0) this.lock(L);
     }
     if (s.act === 'idle' || s.act === 'walk' || s.act === 'mark') this.go(s, 'hurt', 0.35);
-    if (Math.random() < 0.35) this.say(L, s, choose(LINES4.backHit as unknown as string[]), 1.3);
+    if (Math.random() < 0.35 && this.signal !== 'red') this.say(L, s, choose(LINES4.backHit as unknown as string[]), 1.3);
     this.checkDown(L);
   }
   /** both hurt in time: the wounds stay */
@@ -542,7 +696,7 @@ export class Twins implements Boss3Like, Netted, Actor3 {
   /** her wound wasn't paired: the twin gives her strength back */
   private healBack(L: Level3D, s: Sis) {
     const t = this.twin(s);
-    if (t.down || s.down) { s.fresh = 0; return; }
+    if (t.down || s.down || this.signal === 'red') { s.fresh = 0; return; }
     s.hp = Math.min(s.maxHp, s.hp + s.fresh);
     s.fresh = 0;
     this.beam(L, t, s, SISTER_COLOR[t.kind]);
@@ -564,24 +718,37 @@ export class Twins implements Boss3Like, Netted, Actor3 {
       audio.sfx('enemyDie');
       const t = this.twin(s);
       if (t.fresh > 0) { t.fresh = 0; t.freshT = 0; }
-      if (!t.down) { this.mode = 'alone'; this.modeT = 0; this.say(L, t, t.kind === 'nochka' ? LINES4.nochka[2] : LINES4.tenka[2], 1.4); }
+      if (!t.down) {
+        if (this.phase < 3) { this.mode = 'alone'; this.modeT = 0; }
+        this.say(L, t, t.kind === 'nochka' ? LINES4.nochka[2] : LINES4.tenka[2], 1.4);
+      }
     }
-    if (this.sis.every((s) => s.down)) this.die(L);
-    else if (this.phase === 1 && this.sis[0].hp + this.sis[1].hp <= (this.sis[0].maxHp + this.sis[1].maxHp) * 0.5) {
-      this.phase = 2; this.quarrelT = 0; this.quarrelI = 0;
+    if (this.sis.every((s) => s.down)) { this.die(L); return; }
+    const left = (this.sis[0].hp + this.sis[1].hp) / (this.sis[0].maxHp + this.sis[1].maxHp);
+    if (this.phase === 1 && left <= 0.5) {
+      this.phase = 2;
       L.hud.showBanner('СЁСТРЫ ПОССОРИЛИСЬ!', '#ff6ad8');
+      if (this.sis.every((s) => !s.down)) this.quarrel(LINES4.quarrel);
     }
+    if (this.phase === 2 && left <= 0.2) this.startLights(L);
   }
   private die(L: Level3D) {
     if (this.mode === 'dead') return;
     this.mode = 'dead'; this.won = true;
     for (const s of this.sis) { s.gazeOn = 0; this.go(s, 'down', 99); }
     for (const k of this.spikes) k.cancel();
+    this.signal = 'off'; this.floor.visible = false;
     for (const w of L.waves) L.scene.remove(w.obj);
     L.waves.length = 0;
     L.hitstop(0.3); L.whiteFlash = 0.6; L.tcam.shake(0.8);
     L.nl?.entEvent(this, 'dead', {});
     this.onDefeat?.();
+  }
+  /** dev / tests: bring both sisters down to `k` of their health (a paired wound: phases 2 and 3 follow) */
+  debugTo(L: Level3D, k: number) {
+    if (!this.fighting || !L.authority) return;
+    for (const s of this.sis) if (!s.down) { s.hp = Math.max(1, Math.round(s.maxHp * k)); s.fresh = 0; s.freshT = 0; }
+    this.checkDown(L);
   }
   /** dev / tests: knock both out */
   debugKill(L: Level3D) { if (!this.fighting) return; for (const s of this.sis) { s.hp = 0; s.fresh = 0; } this.checkDown(L); }
@@ -625,7 +792,7 @@ export class Twins implements Boss3Like, Netted, Actor3 {
     s.root.scale.set(sc, 1 + s.vanish * 0.6, sc);
     s.root.visible = !s.hidden && s.vanish < 0.98;
     const a = s.anim;
-    a.st = s.act === 'swapOut' || s.act === 'swapIn' ? 'swap' : s.act === 'idle' && L.dialog.active && s.talk > 0 ? 'talk' : s.act;
+    a.st = s.act === 'swapOut' || s.act === 'swapIn' ? 'swap' : s.argue ? 'argue' : s.act === 'idle' && L.dialog.active && s.talk > 0 ? 'talk' : s.act;
     a.p = pr;
     a.head = clamp(wrapA(s.gaze - s.yaw), -1.3, 1.3);
     a.flash = s.flash;
@@ -648,6 +815,14 @@ export class Twins implements Boss3Like, Netted, Actor3 {
       s.lane.rotation.y = Math.atan2(dx, dz);
       s.lane.scale.set(1, 1, Math.max(0.1, len));
       s.laneM.opacity = s.act === 'dash' ? 0.5 : 0.25 + 0.25 * Math.abs(Math.sin(L.t * 12));
+    }
+    // the ribbon between their knots (after both have moved)
+    if (s.i === 1) {
+      const [a0, b0] = this.sis;
+      a0.root.updateMatrixWorld(true); b0.root.updateMatrixWorld(true);
+      a0.rig.knot.getWorldPosition(this.kA); b0.rig.knot.getWorldPosition(this.kB);
+      const vis = !a0.hidden && !b0.hidden && a0.root.visible && b0.root.visible && a0.vanish < 0.4 && b0.vanish < 0.4;
+      this.tether.update(dt, this.kA, this.kB, vis);
     }
   }
 
@@ -674,6 +849,17 @@ export class Twins implements Boss3Like, Netted, Actor3 {
       }
       if (s.down) text(ctx, '✖', x + bw / 2, y + 17, { size: 18, color: '#ffffff', align: 'center', stroke: 4 });
     });
+    // phase 3: the stone's three lamps between the bars
+    if (this.signal !== 'off') {
+      const cx = W / 2, cy = y + 11;
+      rrect(ctx, cx - 13, cy - 34, 26, 68, 8, '#1e1a22', 3);
+      (['red', 'yellow', 'green'] as const).forEach((c, k) => {
+        const lit = this.signal === c && (c !== 'yellow' || Math.sin(L.t * 18) > -0.3);
+        ctx.beginPath(); ctx.arc(cx, cy - 21 + k * 21, 8, 0, Math.PI * 2);
+        ctx.fillStyle = lit ? SIGNAL_COLOR[c] : '#3a3040'; ctx.fill();
+        if (lit) { ctx.globalAlpha = this.hudK * 0.35; ctx.beginPath(); ctx.arc(cx, cy - 21 + k * 21, 15, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = this.hudK; }
+      });
+    }
     // who watches MY hero → which sister I can't hurt
     const p = L.player;
     if (!p.dead && this.fighting) {
@@ -703,13 +889,17 @@ export class Twins implements Boss3Like, Netted, Actor3 {
     const out: number[] = [MODES.indexOf(this.mode), this.phase];
     for (const s of this.sis) {
       out.push(s.pos.x, s.pos.y, s.pos.z, s.yaw, s.gaze, s.gazeOn, s.hp, s.maxHp, s.fresh, s.freshT, ACTS.indexOf(s.act), clamp(s.actT / s.actMax, 0, 1),
-        (s.distractT > 0 ? 1 : 0) + (s.slowT > 0 ? 2 : 0) + (s.down ? 4 : 0) + (s.flash > 0.5 ? 8 : 0), s.dashFrom.x, s.dashFrom.z, s.dashTo.x, s.dashTo.z, s.tp);
+        (s.distractT > 0 ? 1 : 0) + (s.slowT > 0 ? 2 : 0) + (s.down ? 4 : 0) + (s.flash > 0.5 ? 8 : 0) + (s.argue ? 16 : 0), s.dashFrom.x, s.dashFrom.z, s.dashTo.x, s.dashTo.z, s.tp);
     }
+    // (phase 3: when the stone's cycle started, on the room clock)
+    out.push(this.lightT0);
     return out;
   }
   netApply(a: number[], t?: number) {
     if (t === undefined) return;
     const per = 18;
+    // (the stone's cycle start: not interpolated, it's a clock time)
+    if (typeof a[2 + 2 * per] === 'number') this.lightT0 = a[2 + 2 * per];
     this.sis.forEach((s, i) => {
       const o = 2 + i * per;
       const rec = [a[0], a[1], ...a.slice(o, o + per)];
@@ -731,7 +921,7 @@ export class Twins implements Boss3Like, Netted, Actor3 {
         if (act !== s.act) { s.act = act; s.actT = 0; }
         s.hp = r[8]; s.maxHp = r[9]; s.fresh = r[10]; s.freshT = r[11];
         const f = r[14];
-        s.distractT = f & 1 ? 1 : 0; s.slowT = f & 2 ? 1 : 0; s.down = !!(f & 4); if (f & 8) s.flash = 1;
+        s.distractT = f & 1 ? 1 : 0; s.slowT = f & 2 ? 1 : 0; s.down = !!(f & 4); if (f & 8) s.flash = 1; s.argue = !!(f & 16);
         s.dashFrom.set(r[15], s.pos.y, r[16]); s.dashTo.set(r[17], s.pos.y, r[18]);
       });
       s.gaze = s.gaze + wrapA(tr.lerp(6, true) - s.gaze);
@@ -748,11 +938,11 @@ export class Twins implements Boss3Like, Netted, Actor3 {
     if (ev === 'spike' && d.p && typeof d.at === 'number') this.spikes.push(new Spike(L, new THREE.Vector3(d.p[0], d.p[1], d.p[2]), d.at));
     else if (ev === 'bark' && typeof d.i === 'number' && d.s) { const s = this.sis[d.i]; if (s) { s.talk = 0.6; L.bark(s.root, d.s, d.d ?? 1.4, 2.45); } }
     else if (ev === 'toast' && d.s) L.toast(d.s);
-    else if (ev === 'dead') { this.mode = 'dead'; this.won = true; for (const s of this.sis) { s.down = true; s.gazeOn = 0; s.act = 'down'; } for (const k of this.spikes) k.cancel(); }
+    else if (ev === 'dead') { this.mode = 'dead'; this.won = true; for (const s of this.sis) { s.down = true; s.gazeOn = 0; s.act = 'down'; } for (const k of this.spikes) k.cancel(); this.signal = 'off'; this.floor.visible = false; }
   }
 
   /** the fight's defeat scene: hide the sisters (they became little bats) */
-  vanishAll() { this.won = true; this.mode = 'dead'; for (const s of this.sis) { s.hidden = true; s.root.visible = false; s.cone.visible = false; s.lane.visible = false; } }
+  vanishAll() { this.won = true; this.mode = 'dead'; this.signal = 'off'; this.floor.visible = false; for (const s of this.sis) { s.hidden = true; s.root.visible = false; s.cone.visible = false; s.lane.visible = false; } this.tether.root.visible = false; }
   /** solo helpers at the rim (the cast, minus the hero I play) */
   setHelpers(L: Level3D, spots: { kind: CastKind; at: THREE.Vector3 }[]) {
     this.helpers = spots;

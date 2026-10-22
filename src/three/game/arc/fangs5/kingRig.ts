@@ -11,7 +11,8 @@ import type { Rig } from '../../../models/rig';
 const fo = { cast: false };
 
 export interface KAnim {
-  /** idle walk windup slash thrust cast fly dive stagger block kneel talk bow hover */
+  /** idle walk windup slash thrust cast fly dive stagger block kneel talk bow hover · (v2) sit eat (a bite to the
+   *  mouth, seated) cut (seated, the knife hand down on the plate) taste (kneeling, leaning to a spoon) */
   st: string;
   p: number;
   speed: number;
@@ -27,8 +28,12 @@ export interface KAnim {
   stir: number;
   /** 0..1 burning (the solar shot) */
   burn: number;
+  /** (v2) 0..1 colour comes into his grey face (the first taste: a blush) */
+  blush?: number;
+  /** (v2) 0..1 he lifts his head to the moon */
+  look?: number;
 }
-export const kAnim = (): KAnim => ({ st: 'idle', p: 0, speed: 0, flash: 0, talk: 0, wings: 0, glint: 0, sword: 1, stir: 0, burn: 0 });
+export const kAnim = (): KAnim => ({ st: 'idle', p: 0, speed: 0, flash: 0, talk: 0, wings: 0, glint: 0, sword: 1, stir: 0, burn: 0, blush: 0, look: 0 });
 
 export interface KingRig extends Rig<KAnim> {
   M: Mats;
@@ -202,13 +207,17 @@ export function createKingMidnight(): KingRig {
   const mouth = grp(head, [0, -0.07, 0.17]);
   const mouthIn = part(mouth, G.ball(), basic('#2a0c18'), [0, 0, 0], [0.05, 0.012, 0.01], undefined, fo);
   for (const s of [1, -1]) part(mouth, G.cone(), basic('#ffffff'), [s * 0.025, -0.012, 0.004], [0.01, 0.03, 0.01], [Math.PI, 0, 0], fo);
+  // (v2) the first taste: two pink cheeks come up in the grey face
+  const blushM = new THREE.MeshBasicMaterial({ color: '#ff7a9a', transparent: true, opacity: 0, depthWrite: false });
+  for (const s of [1, -1]) { const c = part(head, G.ball(), blushM, [s * 0.12, 0.0, 0.15], [0.05, 0.03, 0.02], undefined, fo); noOutline(c); }
+  const skinBase = { c: skin.color.clone() };
   // burning (the solar shot): an orange glow over the cloak
   const burnM = new THREE.MeshBasicMaterial({ color: '#ffa040', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
   const burnMesh = new THREE.Mesh(cg, burnM); burnMesh.position.y = -1.0; burnMesh.scale.setScalar(1.02); noOutline(burnMesh);
   cloak.add(burnMesh);
 
   let t = Math.random() * 5, walk = 0;
-  const cur = { lean: 0, kneel: 0, armR: new THREE.Vector3(), armL: new THREE.Vector3(), wings: 0, twist: 0, crouch: 0 };
+  const cur = { lean: 0, kneel: 0, armR: new THREE.Vector3(), armL: new THREE.Vector3(), wings: 0, twist: 0, crouch: 0, sit: 0, look: 0 };
   return {
     root, M, head, tip, cloak, girl, top: 2.9,
     update(dt, a) {
@@ -216,7 +225,7 @@ export function createKingMidnight(): KingRig {
       walk += dt * clamp(a.speed, 0, 8) * 1.6;
       const sw = a.speed > 0.3 ? Math.sin(walk) : 0;
       // wanted pose
-      let lean = 0, kneel = 0, twist = 0, crouch = 0;
+      let lean = 0, kneel = 0, twist = 0, crouch = 0, sit = 0;
       const R = new THREE.Vector3(0.2, 0, 0.15), Lw = new THREE.Vector3(0.1, 0, -0.15); // (rx, ry, rz) shoulder
       const p = a.p;
       switch (a.st) {
@@ -232,22 +241,27 @@ export function createKingMidnight(): KingRig {
         case 'kneel': R.set(0.9, 0, 0.3); Lw.set(0.7, 0, -0.5); lean = 0.25; kneel = 1; break;
         case 'talk': R.set(0.2, 0, 0.2); Lw.set(-0.9 + Math.sin(t * 3) * 0.2, 0.5, -0.4); break;
         case 'bow': R.set(0.4, 0, 0.2); Lw.set(-0.4, 0.6, -0.2); lean = 0.5 * Math.sin(Math.min(1, p) * Math.PI); break;
+        case 'sit': R.set(-0.7, 0, 0.25); Lw.set(-0.7, 0, -0.25); sit = 1; break;
+        case 'cut': R.set(-0.95, 0.15, 0.1); Lw.set(-0.7, 0, -0.25); sit = 1; lean = 0.18; break;
+        case 'eat': R.set(-0.7, 0, 0.25); Lw.set(-1.75 + Math.sin(t * 1.3) * 0.05, -0.15, -0.55); sit = 1; break;
+        case 'taste': R.set(0.6, 0, 0.3); Lw.set(0.4, 0, -0.4); lean = 0.32; kneel = 1; break;
         default: R.set(0.25 + Math.sin(t * 1.3) * 0.05, 0, 0.18); Lw.set(0.12, 0, -0.18);
       }
       const k = 1 - Math.exp(-dt * (a.st === 'slash' || a.st === 'thrust' ? 30 : 10));
       cur.armR.lerp(R, k); cur.armL.lerp(Lw, k);
       cur.lean = lerp(cur.lean, lean, k); cur.kneel = lerp(cur.kneel, kneel, k); cur.twist = lerp(cur.twist, twist, k); cur.crouch = lerp(cur.crouch, crouch, k);
+      cur.sit = lerp(cur.sit, sit, k); cur.look = lerp(cur.look, a.look ?? 0, k * 0.5);
       arms[0].rotation.set(cur.armR.x, cur.armR.y, cur.armR.z);
       arms[1].rotation.set(cur.armL.x, cur.armL.y, cur.armL.z);
       (arms[0].children[1] as THREE.Object3D).rotation.x = a.st === 'windup' ? -0.6 : -0.15;
-      (arms[1].children[1] as THREE.Object3D).rotation.x = -0.25;
+      (arms[1].children[1] as THREE.Object3D).rotation.x = a.st === 'eat' ? -1.5 : -0.25;
       body.rotation.x = cur.lean;
       body.rotation.y = cur.twist;
       const fly = a.st === 'fly' || a.st === 'hover' || a.st === 'dive';
-      body.position.y = 1.1 - cur.kneel * 0.45 - cur.crouch * 0.3 + (fly ? 0 : Math.sin(t * 1.6) * 0.02);
-      legs[0].rotation.x = fly ? 0.3 : sw * 0.5 - cur.kneel * 1.3; legs[1].rotation.x = fly ? 0.5 : -sw * 0.5 + cur.kneel * 0.2;
-      legs[0].position.y = legs[1].position.y = 1.1 - cur.kneel * 0.45 - cur.crouch * 0.3;
-      head.rotation.x = -cur.lean * 0.4 + (a.st === 'stagger' ? Math.sin(t * 7) * 0.2 : 0);
+      body.position.y = 1.1 - cur.kneel * 0.45 - cur.crouch * 0.3 - cur.sit * 0.5 + (fly ? 0 : Math.sin(t * 1.6) * 0.02);
+      legs[0].rotation.x = fly ? 0.3 : sw * 0.5 - cur.kneel * 1.3 - cur.sit * 1.45; legs[1].rotation.x = fly ? 0.5 : -sw * 0.5 + cur.kneel * 0.2 - cur.sit * 1.45;
+      legs[0].position.y = legs[1].position.y = 1.1 - cur.kneel * 0.45 - cur.crouch * 0.3 - cur.sit * 0.5;
+      head.rotation.x = -cur.lean * 0.4 - cur.look * 0.55 + (a.st === 'stagger' ? Math.sin(t * 7) * 0.2 : 0);
       head.rotation.z = a.st === 'stagger' ? Math.sin(t * 5) * 0.25 : 0;
       // cloak sways; stolen shadows drift inside it
       cloak.rotation.x = 0.08 + cur.lean * 0.3 + (fly ? 0.5 : 0) + Math.sin(t * 2) * 0.03;
@@ -274,6 +288,9 @@ export function createKingMidnight(): KingRig {
       mouth.scale.set(1, 1 + a.talk * 3, 1);
       mouthIn.visible = true;
       burnM.opacity = a.burn * (0.45 + 0.25 * Math.sin(t * 20));
+      const bl2 = a.blush ?? 0;
+      blushM.opacity = bl2 * 0.75;
+      if (bl2 > 0 || skinBase.c.getHex() !== skin.color.getHex()) skin.color.copy(skinBase.c).lerp(new THREE.Color('#ffe2e6'), bl2 * 0.6);
       M.flash(a.flash);
     },
   };

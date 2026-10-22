@@ -16,8 +16,8 @@ import { NetTrack, type NetPose } from '../../netInterp';
 import { Wave3, type Shot3 } from '../../objects';
 import { coop } from '../../coop';
 import { vamp, heroId, markCharacter, GroundMark, ambient, createStars, spinStars } from '../vampires';
-import { createLady, createWolf, createToad, createCrow, type MorokRig, type MorokAnim } from './models';
-import { MOROK, HELP, TOASTS } from './lines';
+import { createLady, createWolf, createToad, createCrow, createVoron, SHOULDER, type MorokRig, type MorokAnim, type VoronAnim } from './models';
+import { MOROK, HELP, TOASTS, VORON, NOKI_REAL } from './lines';
 
 /**
  * Мадам Морок (docs/script-fangs.md §6.3–6.5) — a shape-shifter on the veranda of her stilt house.
@@ -30,6 +30,12 @@ import { MOROK, HELP, TOASTS } from './lines';
  *   КОПИЯ — she becomes one of the heroes (co-op: a real player's hero with his name tag!) and mingles, striking from
  *           behind. Tell: no shadow. A hit on her, Ноки's chord, or light (Пастила's beacon, a «солнышко») unmasks her
  *           → dazed. Not found in time → she bursts off in crows and the window is lost.
+ * v2 (docs/script-fangs-v2.md §6.4): Кар-Карыч rides her shoulder and sits on the rail while she is a beast — he caws
+ *   when the real (veiled) crow dives and grumbles at her. Every «без сил» bursts jars on the veranda (onWindow → the
+ *   level lights the arena). Phase 3 «Две Ноки»: she copies Ноки (the one rule she keeps otherwise — never copy Ноки, she
+ *   has no shadow either — is turned round): the fake is sweet and her chord rings off-key, in grey notes; light doesn't
+ *   help. Solo: the NPC Ноки grumbles beside her, Тоша points after 4 s. Co-op: a player Ноки is copied (name tag!),
+ *   else a plain Ноки.
  * Solo: the story four stand on the veranda; in the copy phase they walk in (she hides among them — and copies them),
  * Пастила puts down beacons («Маяк! В его свете тени чётче!»), Ноки strums when Пастила is the player.
  * HP grows with the party; telegraphs shorten as she weakens (phases at 66 % / 33 %).
@@ -44,7 +50,7 @@ export const ARENA = { cx: -8, cz: -161, hx: 11, hz: 8, y: 1.4 };
 const NET_ID = 93100;
 const FORMS = ['intro', 'lady', 'wolf', 'toad', 'crows', 'copy', 'dead'] as const;
 type Form = (typeof FORMS)[number];
-const ACTS = ['sit', 'idle', 'taunt', 'cast', 'dazed', 'aim', 'run', 'skid', 'puff', 'tongue', 'crouch', 'jump', 'flop', 'circle', 'mingle', 'stalk', 'strike', 'flee', 'fall'] as const;
+const ACTS = ['sit', 'idle', 'taunt', 'cast', 'dazed', 'aim', 'run', 'skid', 'puff', 'tongue', 'crouch', 'jump', 'flop', 'circle', 'mingle', 'stalk', 'strike', 'flee', 'fall', 'strum'] as const;
 type Act = (typeof ACTS)[number];
 const CYCLE: Form[] = ['wolf', 'toad', 'crows', 'copy'];
 const ATK_OF: Record<HeroKind, HeroAtk> = { tosha: 'sword', bublik: 'punch', noki: 'axe', pastila: 'flask' };
@@ -118,9 +124,35 @@ export class Morok3 implements Boss3Like, Netted {
   gone = false;
   // rigs
   lady = createLady(); wolf = createWolf(); toad = createToad();
+  /** Кар-Карыч (§2.2): on her shoulder; on the rail while she is a beast. `voronScript`: a scene moves him itself */
+  voron = createVoron();
+  voronG = new THREE.Group();
+  voronScript = false;
+  voronAnim: VoronAnim = { st: 'perch', talk: 0 };
+  /** scenes: her lady figure hidden (6.3: Пастила sits in the chair) / a pose of her own ('shy': Морося) */
+  hideLady = false;
+  pose: string | null = null;
+  /** every machine: she just fell «без сил» (n = how many times so far) — the level bursts jars */
+  onWindow: ((n: number) => void) | null = null;
+  /** «Две Ноки» is on (phase 3 copy) */
+  twoNoki = false;
+  private windowsN = 0;
+  private visAct: Act = 'sit';
+  private visSeq = -1;
+  private visForm: Form = 'intro';
+  private wolvesN = 0;
+  private voronBarkT = 0;
+  private voronPerch = new THREE.Vector3(ARENA.cx - ARENA.hx - 0.75, ARENA.y + 1.05, ARENA.cz + 1.5);
+  private voronOn = true;
+  private sweetT = 0;
+  private strumT = 0;
+  private realT = 0;
+  private pointT = 0;
+  private strumSeen = -1;
   crows: Crow[] = [];
   private ladyG = new THREE.Group(); private wolfG = new THREE.Group(); private toadG = new THREE.Group();
-  private chair = new THREE.Group();
+  /** the rocking chair (6.3 turns it round) */
+  chair = new THREE.Group();
   private anim: MorokAnim = { st: 'sit', p: 0, flash: 0, talk: 0, speed: 0 };
   private stars = createStars();
   private lane: Lane; private tongueLane: Lane;
@@ -163,6 +195,11 @@ export class Morok3 implements Boss3Like, Netted {
     for (const [g, r] of [[this.ladyG, this.lady], [this.wolfG, this.wolf], [this.toadG, this.toad]] as const) { g.add(r.root); S.add(g); markCharacter(r.root); }
     this.wolfG.visible = false; this.toadG.visible = false;
     S.add(this.root);
+    // Кар-Карыч takes the little crow's place on her shoulder
+    this.lady.crow.root.visible = false;
+    this.voronG.add(this.voron.root);
+    markCharacter(this.voron.root);
+    S.add(this.voronG);
     this.stars.position.y = 1.5;
     this.ladyG.add(this.stars);
     this.lane = new Lane(L, '#ff3040');
@@ -267,7 +304,16 @@ export class Morok3 implements Boss3Like, Netted {
           if (this.at <= 0) { this.go('cast', 0.7); this.morphFx(); }
           break;
         }
-        if (this.act === 'cast') { if (this.at <= 0) { const f = CYCLE[this.cycleI++ % CYCLE.length]; this.setForm(f); this.enter(L, f); } break; }
+        if (this.act === 'cast') {
+          if (this.at <= 0) {
+            // phase 3 «Кто из вас я?»: the copy comes every other time (the first one at once)
+            let f = CYCLE[this.cycleI % CYCLE.length];
+            if (this.phase === 3 && f !== 'copy' && this.lastCycle !== 'copy') f = 'copy'; else this.cycleI++;
+            this.lastCycle = f;
+            this.setForm(f); this.enter(L, f);
+          }
+          break;
+        }
         this.go('taunt', 1.1);
         break;
       }
@@ -405,6 +451,7 @@ export class Morok3 implements Boss3Like, Netted {
     }
   }
   private toadI = 0;
+  private lastCycle: Form = 'intro';
 
   // ── crows ──
   private spawnCrows(count?: number) {
@@ -472,6 +519,8 @@ export class Morok3 implements Boss3Like, Netted {
     c.dive?.mark.dispose();
     c.dive = { x, y, z, t0, hit: false, mark: new GroundMark(c.veiled ? '#c060ff' : '#ff3040', true) };
     ambient(this.L, () => audio.sfx('batScreech', { pitch: 0.6, volume: 0.3 }));
+    // Кар-Карыч can't help it: he caws when the real one dives (every machine — the dive is a timed event)
+    if (c.veiled) this.voronSay(VORON.dive, 1.0, true);
   }
   private crowDie(c: Crow, by: string | null) {
     if (!c.alive) return;
@@ -497,6 +546,9 @@ export class Morok3 implements Boss3Like, Netted {
   // ── copy ──
   private startCopy(L: Level3D) {
     this.copyStrikes = 0;
+    // phase 3: «Две Ноки»
+    this.twoNoki = this.phase === 3;
+    this.sweetT = 1.6; this.strumT = 3.2; this.realT = 2.6; this.pointT = 4;
     // (solo: the four give the player a few seconds to find her first)
     this.helpT = 4.5;
     this.swapT = L.nl ? 9 : 7;
@@ -508,8 +560,21 @@ export class Morok3 implements Boss3Like, Netted {
   /** host: who she copies now (solo: me first — unless I play Ноки: she never copies her —, then one of the four on the veranda; co-op: a real player) */
   private chooseFake(L: Level3D, first: boolean) {
     let who = '', kind: HeroKind = L.player.kind;
+    if (this.twoNoki) {
+      // «Две Ноки»: a player Ноки is copied (with his name), else a plain Ноки (solo: the NPC Ноки is the real one)
+      kind = 'noki';
+      if (L.nl) { const n = L.alivePlayers().find((h) => (h === L.player ? L.player.kind : L.remote(heroId(h))?.kind) === 'noki'); who = n ? heroId(n) : ''; }
+      else who = L.player.kind === 'noki' ? 'me' : '';
+      this.makeFake(L, who, kind);
+      L.nl?.entEvent(this, 'fake', { w: who, k: kind });
+      this.L.bark(this.root, choose(MOROK.fakeNoki), 2.2, 1.6);
+      return;
+    }
     if (L.nl) {
-      const ids = L.alivePlayers().map((h) => heroId(h));
+      // (never a Ноки player here: she has no shadow either — only «Две Ноки» copies her, on purpose)
+      const all = L.alivePlayers().map((h) => heroId(h));
+      const notNoki = all.filter((i) => (i === net.myId ? L.player.kind : L.remote(i)?.kind) !== 'noki');
+      const ids = notNoki.length ? notNoki : all;
       const cur = this.fake?.who;
       const pool = ids.filter((i) => i !== cur);
       who = choose(pool.length ? pool : ids.length ? ids : [net.myId]);
@@ -529,6 +594,9 @@ export class Morok3 implements Boss3Like, Netted {
   }
   private mingleSpot(out: THREE.Vector3) {
     const L = this.L;
+    // «Две Ноки»: she keeps close to the real one (side by side)
+    const real = this.twoNoki ? this.realNoki() : null;
+    if (real) { const a = rand(0, Math.PI * 2), r = rand(1.6, 2.8); return this.clampArena(out.set(real.x + Math.cos(a) * r, ARENA.y, real.z + Math.sin(a) * r), 1.2); }
     const hs = L.alivePlayers();
     const c = v2.set(0, 0, 0);
     let n = 0;
@@ -538,15 +606,30 @@ export class Morok3 implements Boss3Like, Netted {
     const a = rand(0, Math.PI * 2), r = rand(1.8, 3.6);
     return this.clampArena(out.set(c.x + Math.cos(a) * r, ARENA.y, c.z + Math.sin(a) * r), 1.2);
   }
+  /** where the real Ноки is (solo: the NPC or me; co-op: a player Ноки) */
+  private realNoki(): THREE.Vector3 | null {
+    const L = this.L;
+    if (!L.nl) { if (L.player.kind === 'noki') return L.player.pos; return this.cast.find((n) => n.kind === 'noki')?.root.position ?? null; }
+    const who = this.fake?.who;
+    if (who) { const h = L.alivePlayers().find((x) => heroId(x) === who); if (h) return h.pos; }
+    return null;
+  }
   private copyAI(L: Level3D, dt: number, sp: number) {
     const f = this.fake;
     if (!f) { this.window(L); return; }
-    // unmasked by light (a beacon, a «солнышко»)
-    if (vamp(L).sunAt(v1.copy(this.pos).setY(this.pos.y + 0.5)) > 0.3) { this.lightT += dt; if (this.lightT > 0.35) { this.unmask(L, null, 'light'); return; } }
+    // unmasked by light (a beacon, a «солнышко») — not in «Две Ноки»: the real one has no shadow either
+    if (!this.twoNoki && vamp(L).sunAt(v1.copy(this.pos).setY(this.pos.y + 0.5)) > 0.3) { this.lightT += dt; if (this.lightT > 0.35) { this.unmask(L, null, 'light'); return; } }
     else this.lightT = Math.max(0, this.lightT - dt);
-    // swap to someone else now and then
+    if (this.twoNoki) {
+      // she is sweet …
+      if ((this.sweetT -= dt) <= 0) { this.sweetT = rand(3.2, 4.4); this.L.bark(this.root, choose(MOROK.fakeNoki), 2.2, 1.6); this.realT = 1.2; }
+      // … and strums a chord that rings false (grey notes)
+      if ((this.strumT -= dt) <= 0 && (this.act === 'mingle' || this.act === 'flee')) { this.strumT = rand(4.2, 5.6); this.go('strum', 1.0); }
+      if (this.act === 'strum') { if (this.at <= 0) this.go('mingle', rand(1.2, 2)); return; }
+    }
+    // swap to someone else now and then (not in «Две Ноки»)
     this.swapT -= dt;
-    if (this.swapT <= 0 && this.act !== 'strike') {
+    if (this.swapT <= 0 && this.act !== 'strike' && !this.twoNoki) {
       this.swapT = (L.nl ? 8.5 : 6.5) * sp;
       this.morphFx();
       this.pos.copy(this.mingleSpot(v1));
@@ -614,6 +697,7 @@ export class Morok3 implements Boss3Like, Netted {
     this.unmaskFx(L, how);
     if (how === 'hit') this.hurt(L, 2, this.center(), by, true);
     if ((this.form as Form) !== 'dead') this.window(L);
+    this.twoNoki = false;
   }
   private unmaskFx(L: Level3D, how: string) {
     const c = this.center();
@@ -633,6 +717,7 @@ export class Morok3 implements Boss3Like, Netted {
     L.nl?.entEvent(this, 'unmask', { h: 'burst' });
     ambient(L, () => this.burstHit(L));
     this.dropFake();
+    this.twoNoki = false;
     this.setForm('lady');
     this.go('taunt', 1.2);
   }
@@ -699,8 +784,23 @@ export class Morok3 implements Boss3Like, Netted {
       const hit = this.castHits.get(n) ?? 0;
       if (hit > 0) { this.castHits.set(n, hit - dt); an.flash = Math.max(0, hit - 0.2); }
     }
+    // «Две Ноки»: the real one grumbles next to the sweet one; Тоша points after 4 s
+    if (this.form === 'copy' && fight && this.fake && this.twoNoki) {
+      const nok = this.cast.find((c) => c.kind === 'noki');
+      if (nok && (this.realT -= dt) <= 0) { this.realT = rand(4, 5.5); L.bark(nok.root, choose(NOKI_REAL), 2.2, 2.0); }
+      if ((this.pointT -= dt) <= 0) {
+        this.pointT = 6;
+        const tosha = this.cast.find((c) => c.kind === 'tosha') ?? this.cast.find((c) => c.kind !== 'noki');
+        if (tosha) {
+          L.bark(tosha.root, HELP.twoNoki, 2.2, 2.0);
+          (tosha.anim as HeroAnim).state = 'cheer';
+          tosha.root.rotation.y = Math.atan2(this.pos.x - tosha.root.position.x, this.pos.z - tosha.root.position.z);
+          ambient(L, () => { L.fx.ring(this.pos.clone().setY(ARENA.y + 0.1), 1.4, '#ffe14a', 0.6); L.fx.text(this.center().setY(this.pos.y + 2.4), 'Вон та!', '#ffe14a', 24); });
+        }
+      }
+    }
     // Пастила's beacon / Ноки's chord in the copy phase
-    if (this.form === 'copy' && fight && this.fake) {
+    else if (this.form === 'copy' && fight && this.fake) {
       this.helpT -= dt;
       if (this.helpT <= 0) {
         this.helpT = 5.5;
@@ -731,6 +831,7 @@ export class Morok3 implements Boss3Like, Netted {
       this.castHits.set(n, 0.8);
       L.fx.text(n.root.position.clone().setY(n.root.position.y + 2.2), 'Ой!', '#ffffff', 22);
       if (n.kind === 'bublik') L.bark(n.root, HELP.bublik, 1.6, 1.6);
+      else if (this.twoNoki && n.kind === 'noki') L.bark(n.root, NOKI_REAL[0], 2.2, 2.0);
       else this.helper('noki', HELP.noki);
       return true;
     }
@@ -846,7 +947,7 @@ export class Morok3 implements Boss3Like, Netted {
       const was = this.form;
       this.form = f;
       if (f === 'crows') this.spawnCrows(a[18] || undefined); else if (was === 'crows') this.killCrows();
-      if (f !== 'copy') this.dropFake();
+      if (f !== 'copy') { this.dropFake(); this.twoNoki = false; }
       if (f === 'dead') { this.dropFake(); this.killCrows(); }
     }
     if (f === 'crows' && a[18] && this.crows.length !== a[18]) this.spawnCrows(a[18]);
@@ -866,7 +967,7 @@ export class Morok3 implements Boss3Like, Netted {
     switch (ev) {
       case 'dive': { const c = this.crows.find((x) => x.i === d.i); if (c && c.alive) this.startDive(c, d.x ?? 0, d.y ?? ARENA.y, d.z ?? 0, d.t ?? this.st); break; }
       case 'crow': { const c = this.crows.find((x) => x.i === d.i); if (c) this.crowDie(c, null); break; }
-      case 'fake': this.form = 'copy'; this.makeFake(L, d.w ?? '', d.k ?? 'tosha'); break;
+      case 'fake': this.form = 'copy'; this.twoNoki = d.k === 'noki'; this.makeFake(L, d.w ?? '', d.k ?? 'tosha'); break;
       case 'unmask':
         if (d.h === 'burst') { this.burstHit(L); this.dropFake(); }
         else this.unmaskFx(L, d.h ?? 'hit');
@@ -948,7 +1049,7 @@ export class Morok3 implements Boss3Like, Netted {
   // ───────────────────────── every machine: looks ─────────────────────────
   private place(dt: number) {
     const f = this.form;
-    const lady = !this.gone && (f === 'lady' || f === 'intro' || f === 'dead');
+    const lady = !this.gone && !this.hideLady && (f === 'lady' || f === 'intro' || f === 'dead');
     this.ladyG.visible = lady; this.wolfG.visible = f === 'wolf'; this.toadG.visible = f === 'toad';
     const g = lady ? this.ladyG : f === 'wolf' ? this.wolfG : this.toadG;
     g.position.copy(this.pos);
@@ -977,7 +1078,7 @@ export class Morok3 implements Boss3Like, Netted {
     else { this.chair.rotation.x = damp(this.chair.rotation.x, 0, 4, dt); this.ladyG.rotation.x = 0; }
     // rigs
     if (this.ladyG.visible) {
-      a.st = this.form === 'intro' ? 'sit' : this.form === 'dead' ? 'fall' : this.act === 'dazed' ? 'dazed' : this.act === 'cast' ? 'cast' : this.act === 'taunt' ? 'taunt' : 'idle';
+      a.st = this.pose ?? (this.form === 'intro' ? 'sit' : this.form === 'dead' ? 'fall' : this.act === 'dazed' ? 'dazed' : this.act === 'cast' ? 'cast' : this.act === 'taunt' ? 'taunt' : 'idle');
       this.lady.update(dt, a);
       this.stars.visible = this.act === 'dazed' && this.form === 'lady';
       if (this.stars.visible) spinStars(this.stars, L.t, 0.4);
@@ -1027,7 +1128,8 @@ export class Morok3 implements Boss3Like, Netted {
       const moving = this.act === 'mingle' || this.act === 'stalk' || this.act === 'flee';
       an.state = moving ? 'run' : 'idle';
       an.speed = moving ? 0.8 : 0;
-      an.attack = this.act === 'strike' ? { kind: ATK_OF[f.kind], p: clamp(1 - this.at / this.atMax, 0, 1) } : null;
+      an.attack = this.act === 'strike' ? { kind: ATK_OF[f.kind], p: clamp(1 - this.at / this.atMax, 0, 1) } : this.act === 'strum' ? { kind: 'chord', p: clamp(1 - this.at / this.atMax, 0, 1) } : null;
+      if (this.act === 'strum') an.state = 'idle';
       // a little hop now and then, like a player
       f.hopT -= dt;
       const hop = f.hopT < 0 ? Math.sin(Math.min(1, -f.hopT / 0.55) * Math.PI) * 1.1 : 0;
@@ -1049,9 +1151,96 @@ export class Morok3 implements Boss3Like, Netted {
     if (this.form !== this.hintForm) { this.hintForm = this.form; this.hintT = 2.6; }
     if (this.hintT > 0 && (this.hintT -= dt) <= 0 && !L.worldCut) {
       const tip: Partial<Record<Form, [string, string]>> = { wolf: ['fangs2wolf', TOASTS.wolf], toad: ['fangs2toad', TOASTS.toad], crows: ['fangs2crows', TOASTS.crows], copy: L.nl ? ['fangs2copyCoop', TOASTS.bossCoop] : ['fangs2copy', TOASTS.copySolo] };
-      const h = tip[this.form];
+      const h = this.form === 'copy' && this.twoNoki ? null : tip[this.form];
       if (h) ambient(L, () => L.hint(h[0], h[1]));
+      // v2: phase 3 and «Две Ноки» say it every time (they are the twist of the fight)
+      if (this.form === 'copy' && this.twoNoki) ambient(L, () => L.hud.toast(TOASTS.twoNoki, 5));
+      else if (this.form === 'copy' && this.phase === 3) ambient(L, () => L.hud.toast(TOASTS.copy3, 5));
     }
+    this.visEvents(L);
+    this.updateVoron(L, dt);
+  }
+
+  // ───────────────────────── every machine: beats + Кар-Карыч ─────────────────────────
+  /** the moments every machine sees by itself (form / action changes): jars, the raven's grumbles, the false chord */
+  private visEvents(L: Level3D) {
+    const newAct = this.act !== this.visAct || this.seq !== this.visSeq;
+    if (this.form !== this.visForm) {
+      const f = this.form;
+      this.visForm = f;
+      if (f === 'wolf' && ++this.wolvesN >= 2) this.voronSay(VORON.wolf, 1.8);
+      if (f === 'copy') this.voronSay(VORON.copy, 1.8, false, 1.2);
+    }
+    if (newAct && this.form === 'lady' && this.act === 'dazed' && this.visAct !== 'dazed') {
+      this.windowsN++;
+      if (this.windowsN % 2 === 0) this.voronSay(VORON.hurt, 1.6);
+      this.onWindow?.(this.windowsN);
+    }
+    // the fake Ноки strums: the chord rings false — grey notes, a sour sound
+    if (this.form === 'copy' && this.act === 'strum' && this.fake && this.strumSeen !== this.seq) {
+      this.strumSeen = this.seq;
+      const at = this.fake.g.position.clone().setY(ARENA.y + 1.2);
+      ambient(L, () => {
+        L.fx.emit(at, { count: 14, speed: [1.2, 2.6], dir: new THREE.Vector3(0, 1, 0), spread: 0.9, life: [0.8, 1.4], size: [0.18, 0.3], colors: ['#7a7a86', '#9a98a8', '#5a5864'], g: -1.5, drag: 1.5 });
+        L.fx.ring(at.clone().setY(ARENA.y + 0.1), 3.2, '#8a8a96', 0.5);
+        L.fx.text(at.clone().setY(at.y + 1.1), '♪?', '#9a98a8', 26);
+        audio.sfx('clang', { pitch: 0.53, volume: 0.45 });
+        audio.sfx('clang', { pitch: 0.71, volume: 0.35 });
+      });
+    }
+    this.visAct = this.act; this.visSeq = this.seq;
+  }
+  /** a bark of Кар-Карыч (every machine shows it itself); `caw`: flap + a croak */
+  voronSay(str: string, dur = 1.6, caw = false, delay = 0) {
+    const L = this.L;
+    if (this.voronBarkT > 0 && !caw) return;
+    const go = () => {
+      if (this.form === 'dead' && !this.voronScript) return;
+      this.voronBarkT = 2.2;
+      ambient(L, () => { L.bark(this.voronG, str, dur, 0.9); audio.sfx('hiss', { pitch: 2.2, volume: 0.35 }); });
+      this.voronAnim.talk = 1;
+      this.voronFlap = 0.6;
+    };
+    if (delay > 0) this.voronLater = { t: delay, go }; else go();
+  }
+  private voronLater: { t: number; go: () => void } | null = null;
+  private voronFlap = 0;
+  /** auto: on her shoulder when she is a lady; on the west rail while she is a beast / a flock / a copy */
+  private updateVoron(L: Level3D, dt: number) {
+    this.voronBarkT -= dt;
+    if (this.voronLater && (this.voronLater.t -= dt) <= 0) { const f = this.voronLater.go; this.voronLater = null; f(); }
+    const a = this.voronAnim;
+    a.talk = Math.max(0, a.talk - dt * 2.5);
+    this.voronFlap -= dt;
+    if (!this.voronScript) {
+      const onShoulder = this.ladyG.visible && this.form !== 'dead';
+      const g = this.voronG;
+      if (onShoulder) {
+        this.ladyG.updateMatrixWorld(true);
+        const want = this.lady.body.localToWorld(v3.copy(SHOULDER));
+        const d = g.position.distanceTo(want);
+        if (!this.voronOn || d > 0.6) {
+          // fly back to her
+          this.voronOn = d < 0.15;
+          const k = Math.min(1, dt * 6);
+          g.position.lerp(want, d > 4 ? Math.min(1, dt * 3) : k);
+          g.rotation.y = Math.atan2(want.x - g.position.x, want.z - g.position.z) || g.rotation.y;
+          a.st = 'fly'; g.scale.setScalar(damp(g.scale.x, 0.62, 4, dt));
+        } else { g.position.copy(want); g.rotation.y = this.yaw; a.st = this.voronFlap > 0 ? 'flap' : 'perch'; g.scale.setScalar(0.62); this.voronOn = true; }
+      } else {
+        this.voronOn = false;
+        const want = this.voronPerch;
+        const d = g.position.distanceTo(want);
+        if (d > 0.1) {
+          g.position.lerp(want, Math.min(1, dt * 3.2));
+          g.rotation.y = Math.atan2(want.x - g.position.x, want.z - g.position.z);
+          a.st = 'fly';
+        } else { g.rotation.y = damp(g.rotation.y, Math.atan2(ARENA.cx - want.x, ARENA.cz - want.z), 4, dt); a.st = this.voronFlap > 0 ? 'flap' : 'perch'; }
+        g.scale.setScalar(damp(g.scale.x, 1, 4, dt));
+      }
+      g.visible = !this.gone;
+    }
+    this.voron.update(dt, a);
   }
 
   /** a puff of black feathers (she changes shape) */
@@ -1084,7 +1273,7 @@ export class Morok3 implements Boss3Like, Netted {
   }
 
   dispose() {
-    this.killCrows(); this.dropFake();
+    this.killCrows(); this.dropFake(); this.voronG.removeFromParent();
     this.lane.mesh.removeFromParent(); this.tongueLane.mesh.removeFromParent(); this.ring.dispose();
   }
 }

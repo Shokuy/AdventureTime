@@ -1,11 +1,26 @@
 /**
  * Every line of «Чёрный перевал» outside the dialog scenes (barks, toasts, signs, HUD, cards). Source of truth:
- * docs/script-fangs.md §8 (Серия 5), §10 (cards), §11 (signs), §12 (death lines); the lines this level needed on top
- * are added to the script in §8 marked (доп.). Players are addressed with «вы».
+ * docs/script-fangs-v2.md §8 (Серия 5), §12 (retry); what v2 keeps «как v1» comes from docs/script-fangs.md §8
+ * (§8.9 (доп.) lines, §10 cards, §11 signs). Players are addressed with «вы».
  */
+/** v2 §8: the banner and its subtitle («Ночь N из 5») */
+export const BANNER = 'Серия 5. Чёрный перевал';
+export const NIGHT = 'Ночь 4 из 5';
+export type Sister = 'nochka' | 'tenka';
+
 export const LINES4 = {
-  // §8.2.1 the bridge gives way (bars + shake)
-  bridge: { tosha: 'Мост рушится! Бегом!', bublik: 'Я могу стать мостом! Но лучше бегите!', pastila: 'Прочность — ноль!' },
+  // v2 §8.2.1 the bridge gives way — Бублик's heroism (bars one after another, by event)
+  bridge: { tosha: 'Мост рушится! Бегом!', bublik: 'Я — мост! Бегите по мне! Только не щекотно!', pastila: 'Прочность — ноль!' },
+  /** v2 §8.2.1 once everybody is across */
+  bridgeCrossed: { tosha: 'Бублик, ты герой!', bublik: 'Я знаю. Мне страшно. Но я знаю.' },
+  /** v2 §8.2.3 at «ОСТ_НОВКА» */
+  stop: 'Остановка. Тут ждали. Дождались?',
+  /** v2 §8.2.4 the sisters' voices from the summit (the wind carries them) */
+  voices: {
+    bridge: [['nochka', 'Сестрица, они на мосту!'], ['tenka', 'Не вижу!'], ['nochka', 'Потому что ты смотришь направо!']] as [Sister, string][],
+    cave: [['tenka', 'Сестрица, а они в пещере?'], ['nochka', 'Не знаю. С моей стороны пещеры нет.']] as [Sister, string][],
+    stairs: [['nochka', 'Мы — одно целое!'], ['tenka', 'Мы — две половинки!']] as [Sister, string][],
+  },
   bridgeToastBublik: 'Бублик может растянуться Мостом там, где мост рухнул. Остальные — в обход по уступам',
   // §8.2.2 the swarm
   swarm: { noki: 'Стая! Не останавливайтесь!', tosha: 'Быстрее, быстрее!' },
@@ -32,10 +47,21 @@ export const LINES4 = {
   tenka: ['А я не смотрю!', 'Сестрица, справа!', 'Не догоните!', 'Мы — две половинки!'],
   swap: ['Меняемся!', 'Хоп!', 'Ищи-свищи!'],
   backHit: ['Ай! Сестрица, ты куда смотрела?!', 'Бить со спины нечестно!', 'Ты должна была смотреть!'],
-  quarrel: [['nochka', 'Это ты отвернулась!'], ['tenka', 'Нет, ты!'], ['nochka', 'Я всегда смотрю налево!'], ['tenka', 'А я — направо!']] as [('nochka' | 'tenka'), string][],
-  help: { bublik: 'Эй, тётя! Смотри, какой я длинный!', tosha: 'Она отвернулась! Бей!', noki: 'Не та — она смотрит!', pastila: 'Сиропом её! Пусть прилипнет!', toshaDistract: 'Эй, сестрица! Смотри сюда!' },
-  // §12 retry
-  retry: [['nochka', 'Опять гости, сестрица?'], ['tenka', 'Опять, сестрица.']] as [('nochka' | 'tenka'), string][],
+  // v2 §8.4 phase 2: the quarrel (while they argue — 1.2 s a line — both look at each other, not at you)
+  quarrel: [['nochka', 'Это ты отвернулась!'], ['tenka', 'Нет, ты!'], ['nochka', 'Я старше на три минуты!'], ['tenka', 'Вот и смотри за двоих!']] as [Sister, string][],
+  // v2 §8.4 phase 3 «Светофор»
+  light: {
+    green: ['nochka', 'Зелёный! Вперёд!'] as [Sister, string],
+    yellow: ['tenka', 'Жёлтый! Внимание, сестрица!'] as [Sister, string],
+    red: [['nochka', 'Красный! Стоим!'], ['tenka', 'Я и так стою! Я сто лет стою!']] as [Sister, string][],
+    toast: 'Камень-светофор! Зелёный — сёстры несутся, жёлтый — внимание, красный — они застывают. Бейте на красный!',
+    banner: 'СВЕТОФОР!',
+  },
+  help: { bublik: 'Эй, тётя! Смотри, какой я длинный!', tosha: 'Она отвернулась! Бей!', noki: 'Не та — она смотрит!', pastila: 'Сиропом её! Пусть прилипнет!', toshaDistract: 'Эй, сестрица! Смотри сюда!', red: 'Красный! Бейте обеих!' },
+  // v2 §12 retry
+  retry: [['nochka', 'Опять гости, сестрица?'], ['tenka', 'Опять, сестрица. Я не вижу, но опять.']] as [Sister, string][],
+  /** v2 §8.3 the rule */
+  ruleToast: 'Пока сестра смотрит на вас, её близняшку не ранить. Отвлекайте одну — бейте другую. Сёстры меняются местами!',
   // §10 cards
   cardDust: { title: 'Пыль солнечного камня', desc: 'Золотая пыль древнего маяка с Чёрного перевала. Мигает жёлтым. Третий ингредиент.' },
   cardSyrup: { title: 'Солнечный сироп', desc: 'Всё солнце Хрумляндии в одной бутылке. Заряжается в Солнечную пушку. Не пить!' },

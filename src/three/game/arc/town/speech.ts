@@ -5,6 +5,7 @@ import { drawPortrait, PORTRAIT_INFO } from '../../../../art/portraits';
 import { Dialog } from '../../../../ui/dialog';
 import type { Waiter } from '../../../../game/coroutine';
 import type { Level3D } from '../../level';
+import { hasStoryFlag } from '../../episodes';
 
 /**
  * Speakers of docs/script-fangs.md in the hub's scenes. Tosha / Bublik / the bear / the narrator are the game's own
@@ -12,7 +13,9 @@ import type { Level3D } from '../../level';
  * (same timing, co-op auto-advance, watchdog) with the shared portraits of art/portraits.ts.
  */
 
-export type SpeakerId = 'tosha' | 'bublik' | 'bear' | 'narrator' | 'pastila' | 'noki' | 'pryanik' | 'iriska' | 'zefirych' | 'beze' | 'ponchik' | 'marmeladka' | 'zhitel' | 'presnyak';
+export type SpeakerId = 'tosha' | 'bublik' | 'bear' | 'narrator' | 'pastila' | 'noki' | 'pryanik' | 'iriska' | 'zefirych' | 'beze' | 'ponchik' | 'marmeladka' | 'zhitel' | 'presnyak'
+  // v2 (docs/script-fangs-v2.md §0): the voice of the invitation card (4.4а), the diary, the raven (barks), Шёпот / Шуршик
+  | 'polnoch' | 'karamel' | 'voron' | 'shepot' | 'shurshik';
 
 interface Speaker { name: string; color: string; bg: string; who?: Who }
 export const SPEAKERS: Record<SpeakerId, Speaker> = {
@@ -30,7 +33,20 @@ export const SPEAKERS: Record<SpeakerId, Speaker> = {
   marmeladka: { name: 'Мармеладка', color: PORTRAIT_INFO.marmeladka.color, bg: '#e4ffe4' },
   zhitel: { name: 'Житель', color: PORTRAIT_INFO.zhitel.color, bg: '#fff0f6' },
   presnyak: { name: 'Пресняк', color: PORTRAIT_INFO.presnyak.color, bg: '#e6e6ea' },
+  polnoch: { name: PORTRAIT_INFO.polnoch.name, color: PORTRAIT_INFO.polnoch.color, bg: PORTRAIT_INFO.polnoch.bg },
+  karamel: { name: PORTRAIT_INFO.karamel.name, color: PORTRAIT_INFO.karamel.color, bg: PORTRAIT_INFO.karamel.bg },
+  voron: { name: PORTRAIT_INFO.voron.name, color: PORTRAIT_INFO.voron.color, bg: PORTRAIT_INFO.voron.bg },
+  shepot: { name: PORTRAIT_INFO.shepot.name, color: PORTRAIT_INFO.shepot.color, bg: PORTRAIT_INFO.shepot.bg },
+  shurshik: { name: PORTRAIT_INFO.shurshik.name, color: PORTRAIT_INFO.shurshik.color, bg: PORTRAIT_INFO.shurshik.bg },
 };
+
+/** the story flag set by 7.5 (fangs3): from then on Шёпот is called Шуршик in the dialog box */
+export const SHURSHIK_FLAG = 'f3:named';
+/** the name in the box: Шёпот → Шуршик once the flag is set (one portrait, the name by the flag) */
+export function speakerName(id: SpeakerId): string {
+  if (id === 'shepot' && hasStoryFlag(SHURSHIK_FLAG)) return SPEAKERS.shurshik.name;
+  return (SPEAKERS[id] ?? SPEAKERS.zhitel).name;
+}
 
 /** the speaker of the line on screen (custom ones only), per dialog box */
 const current = new WeakMap<Dialog, SpeakerId | null>();
@@ -80,9 +96,10 @@ function drawBox(d: Dialog, ctx: CanvasRenderingContext2D, id: SpeakerId) {
   rrect(ctx, bx, by, bw, bh, 22, '#fff7e6', 5);
   drawFace(ctx, id, bx + 86, by + bh / 2 - 6, 62, d.t, d.shown < d.str.length ? Math.abs(Math.sin(d.t * 16)) : 0, d.expr);
   ctx.font = '900 20px Rubik, sans-serif';
-  const nw = ctx.measureText(sp.name).width + 30;
+  const name = speakerName(id);
+  const nw = ctx.measureText(name).width + 30;
   rrect(ctx, bx + 160, by - 18, nw, 34, 12, sp.color, 4);
-  text(ctx, sp.name, bx + 175, by + 6, { size: 20, color: '#fff', stroke: 0 });
+  text(ctx, name, bx + 175, by + 6, { size: 20, color: '#fff', stroke: 0 });
   const tx = bx + 170, maxW = bw - 170 - 40;
   ctx.font = '400 27px Pangolin, "Comic Sans MS", sans-serif';
   const lines = wrap(ctx, d.str, maxW);

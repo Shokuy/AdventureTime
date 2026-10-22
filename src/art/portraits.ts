@@ -23,6 +23,7 @@ export type PortraitId =
   | 'tosha' | 'bublik' | 'bear' | 'narrator'
   | 'pastila' | 'noki' | 'pryanik' | 'zefirych' | 'beze' | 'ponchik' | 'marmeladka' | 'iriska'
   | 'kamysh' | 'svetlyachikha' | 'netopyr' | 'morok' | 'shepot' | 'nochka' | 'tenka' | 'polnoch' | 'kisloplyu'
+  | 'karamel' | 'voron' | 'shurshik'
   | 'zhitel' | 'presnyak';
 export type PortraitExpr = 'normal' | 'happy' | 'sad' | 'angry' | 'scared' | 'surprised' | 'sly' | 'sleepy' | 'hurt';
 /** 'seen': Шёпот revealed (the default Шёпот is invisible — eyes in the dark); 'mouse': a lieutenant shrunk into a
@@ -52,6 +53,10 @@ export const PORTRAIT_INFO: Record<PortraitId, PortraitInfo> = {
   tenka: { name: 'Тенька', color: '#b04ab0', bg: '#f6e2f8' },
   polnoch: { name: 'Король Полночь', color: '#5a4a7a', bg: '#d6d0e4' },
   kisloplyu: { name: 'Граф Кислоплюй', color: '#b89a10', bg: '#f4f7c8' },
+  // v2 (docs/script-fangs-v2.md §0): the diary of Пастила's great-great-grandmother, Мадам Морок's raven, Шёпот by name
+  karamel: { name: 'Карамель (дневник)', color: '#c0702a', bg: '#fff1d6' },
+  voron: { name: 'Кар-Карыч', color: '#3a3a5a', bg: '#dcdce8' },
+  shurshik: { name: 'Шуршик', color: '#6a6aa8', bg: '#d6d2ee' },
   zhitel: { name: 'Житель', color: '#c85a8a', bg: '#fff0f6' },
   presnyak: { name: 'Пресняк', color: '#7a7a86', bg: '#e4e4e8' },
 };
@@ -74,6 +79,7 @@ export function drawPortrait(ctx: C, id: PortraitId | string, cx: number, cy: nu
   const mouse = variant === 'mouse' && MOUSE_KIND[pid] !== undefined;
   const seen = variant === 'seen';
   const bg = mouse ? '#e8e0f2' : pid === 'shepot' && seen ? '#d6d2ee' : info.bg;
+  // (Шуршик = Шёпот revealed: one portrait, the name comes from the speaker map, f3:named)
   const k = r / 50;
   ctx.save();
   ctx.translate(cx, cy);
@@ -589,8 +595,10 @@ const pryanik: Paint = (c, s) => {
 const zefirych: Paint = (c, s) => {
   const skin = '#fff3f6';
   // lamplighter's pole with a lantern on the right
-  c.save(); c.translate(1, 12);
-  toon(c, (cc) => { cc.roundRect(32, -24, 4, 90, 2); }, '#8a6a3a', { lw: LF, off: 1.5, rim: null });
+  // (the whole lantern inside the disc: its top at ≈ 40 from the centre, not cut by the frame)
+  c.save(); c.translate(3, 32);
+  toon(c, (cc) => { cc.roundRect(30, -24, 4, 90, 2); }, '#8a6a3a', { lw: LF, off: 1.5, rim: null });
+  stroke(c, (cc) => { cc.moveTo(32, -24); cc.quadraticCurveTo(32, -30, 34, -31); }, INK, 2);
   glowAt(c, 34, -32, 16, '#ffd060', 0.75);
   toon(c, poly([28, -28, 40, -28, 38, -38, 30, -38]), '#3a3a5a', { lw: LF, off: 1.5 });
   flat(c, (cc) => { cc.roundRect(30.5, -37, 7, 8, 1.5); }, '#ffe890', LD * 0.6);
@@ -778,12 +786,17 @@ const kamysh: Paint = (c, s) => {
   toon(c, head, skin, { off: 5, sh: skinD });
   inside(c, head, () => { c.fillStyle = belly; c.beginPath(); E(0, 26, 27, 13)(c); c.fill(); });
   for (const sd of [-1, 1]) dot(c, sd * 3.5, 6, 1.1, '#3e6a2a');
-  // the reed in the mouth corner
-  const sway = Math.sin(s.t * 1.6) * 1.5;
-  stroke(c, (cc) => { cc.moveTo(12, 17); cc.quadraticCurveTo(28, 10, 42, -4 + sway); }, INK, 4.4);
-  stroke(c, (cc) => { cc.moveTo(12, 17); cc.quadraticCurveTo(28, 10, 42, -4 + sway); }, '#d8b860', 2.2);
-  toon(c, E(41, -6 + sway, 2.8, 6.5, 0.7), '#7a4a2a', { lw: LD, off: 1 });
   features(c, { ex: 16, ey: -9, erx: 7.4, ery: 7.4, iris: '#c8a020', skin, slit: false, lid: 0.42, brow: '#f4f2e8', browW: 11, browLw: 3.4, browInk: true, browY: 4.5, my: 16, mw: 30, blush: null, nose: null }, s);
+  // the reed held in the right corner of the mouth: its root sits ON the corner (drawn over the lip line), it never
+  // crosses an open mouth (the corner moves with the mouth's shape)
+  const sway = Math.sin(s.t * 1.6) * 1.5;
+  const cy = s.mouth === 'grin' || s.mouth === 'smile' ? 13.4 : s.mouth === 'frown' || s.mouth === 'wavy' ? 17.8 : s.mouth === 'smirk' ? 13 : 16.4;
+  const rx0 = s.mouth === 'o' ? 10 + s.open * 2 : 16.2, ry0 = s.mouth === 'o' ? 17.5 : cy;
+  const reed: Path = (cc) => { cc.moveTo(rx0, ry0); cc.quadraticCurveTo(27, 9, 37, -3 + sway); };
+  stroke(c, reed, INK, 4.4);
+  stroke(c, reed, '#d8b860', 2.2);
+  toon(c, E(36.5, -5 + sway, 2.6, 6, 0.7), '#7a4a2a', { lw: LD, off: 1 });
+  toon(c, E(rx0, ry0, 2.2, 1.7), skin, { lw: LD, off: 0.8, rim: null, sh: skinD });
   // wrinkles
   for (const sd of [-1, 1]) stroke(c, (cc) => { cc.moveTo(sd * 10, 4); cc.quadraticCurveTo(sd * 16, 6, sd * 22, 4); }, skinD, 1.4);
 };
@@ -963,6 +976,13 @@ function shepotSeen(c: C, s: St) {
   for (const sd of [-1, 1]) toon(c, poly([sd * 6, 40, sd * 50, 30, sd * 46, -16, sd * 22, 12]), '#2a2a48', { lw: LF, off: 3, rim: '#5a5a8a' });
   toon(c, (cc) => { cc.moveTo(-52, 72); cc.quadraticCurveTo(-48, 30, -16, 28); cc.lineTo(16, 28); cc.quadraticCurveTo(48, 30, 52, 72); cc.closePath(); }, '#24243e', { off: 5, rim: '#5a5a8a' });
   toon(c, O(0, 33, 3.4), '#e8c060', { lw: LD, off: 1.2 });
+  // Карамель's garden apron (down to his heels): bib, a pocket with a trowel, ties at the neck
+  const apron: Path = (cc) => { cc.moveTo(-13, 31); cc.lineTo(13, 31); cc.lineTo(15, 44); cc.quadraticCurveTo(26, 47, 30, 72); cc.lineTo(-30, 72); cc.quadraticCurveTo(-26, 47, -15, 44); cc.closePath(); };
+  toon(c, apron, '#7aa85a', { off: 3, sh: '#4e7a3a', rim: '#b0d890' });
+  stroke(c, (cc) => { cc.moveTo(-13, 31); cc.lineTo(-7, 24); cc.moveTo(13, 31); cc.lineTo(7, 24); }, '#4e7a3a', 2);
+  toon(c, (cc) => { cc.roundRect(-9, 40, 18, 9, 2); }, '#8ab86a', { lw: LD, off: 1, rim: null, sh: '#4e7a3a' });
+  stroke(c, (cc) => { cc.moveTo(4, 41); cc.lineTo(7, 33); }, '#8a8a9a', 2.4);
+  toon(c, E(7.5, 31.5, 1.8, 2.8, 0.4), '#b8b8c8', { lw: LD, off: 0.8, rim: null });
   // enormous bat ears
   for (const sd of [-1, 1]) {
     const ear = poly([sd * 9, -6, sd * 30, -44, sd * 22, 2]);
@@ -1135,17 +1155,115 @@ const presnyak: Paint = (c, s) => {
   c.restore();
 };
 
+// ── Карамель (дневник): голос из раскрытой тетради — обложка с лейкой, страницы с почерком и рисунками ──
+const karamel: Paint = (c, s) => {
+  const flut = s.talk > 0.05 ? Math.sin(s.t * 16) * 1.6 : 0;
+  // a warm glow out of the pages (the voice)
+  glowAt(c, 0, 4, 46, '#ffd890', 0.35 + s.open * 0.25);
+  c.save(); c.translate(0, 5); c.rotate(-0.06 + Math.sin(s.t * 1.2) * 0.02); c.scale(0.84, 0.84);
+  // the cover under the pages: green leather, the watering can stamped on its spine flap
+  const cover: Path = (cc) => { cc.moveTo(-43, -26); cc.quadraticCurveTo(-22, -32, 0, -27); cc.quadraticCurveTo(22, -32, 43, -26); cc.lineTo(44, 30); cc.quadraticCurveTo(22, 25, 0, 31); cc.quadraticCurveTo(-22, 25, -44, 30); cc.closePath(); };
+  toon(c, cover, '#5f8a3e', { off: 3, sh: '#3e6428', rim: '#9ac070' });
+  // the ribbon bookmark hanging out at the bottom
+  const rb = Math.sin(s.t * 2.2) * 2;
+  toon(c, poly([3, 26, 7, 26, 8 + rb, 44, 5 + rb, 40, 2 + rb, 44]), '#e84a6a', { lw: LD, off: 1 });
+  // pages: left and right, curving into the spine
+  const left: Path = (cc) => { cc.moveTo(-40, -23); cc.quadraticCurveTo(-20, -28, -1, -23); cc.lineTo(-1, 27); cc.quadraticCurveTo(-20, 22, -41, 26); cc.closePath(); };
+  const right: Path = (cc) => { cc.moveTo(1, -23); cc.quadraticCurveTo(20, -28, 40, -23 - flut); cc.lineTo(41, 26); cc.quadraticCurveTo(20, 22, 1, 27); cc.closePath(); };
+  toon(c, left, '#fff6e2', { lw: LF, off: 2.5, sh: '#ecdcb8', rim: null });
+  toon(c, right, '#fff6e2', { lw: LF, off: 2.5, sh: '#ecdcb8', rim: null });
+  // the spine's shadow
+  inside(c, U(left, right), () => {
+    const g = c.createLinearGradient(-8, 0, 8, 0);
+    g.addColorStop(0, 'rgba(120,80,40,0)'); g.addColorStop(0.5, 'rgba(120,80,40,0.35)'); g.addColorStop(1, 'rgba(120,80,40,0)');
+    c.fillStyle = g; c.fillRect(-8, -30, 16, 60);
+    // faint ruled lines
+    c.strokeStyle = 'rgba(150,170,210,0.35)'; c.lineWidth = 0.6;
+    for (let y = -14; y < 24; y += 5.5) { c.beginPath(); c.moveTo(-38, y); c.quadraticCurveTo(-20, y - 3, -2, y); c.moveTo(2, y); c.quadraticCurveTo(20, y - 3, 39, y); c.stroke(); }
+  });
+  const ink = '#6a3a1a';
+  // left page: the watering can (Карамель's sign) sketched in ink, a pressed flower under it
+  c.save(); c.translate(-21, -6);
+  stroke(c, (cc) => { cc.moveTo(-9, 2); cc.lineTo(-7, 12); cc.lineTo(7, 12); cc.lineTo(9, 2); cc.closePath(); }, ink, 1.6);
+  stroke(c, (cc) => { cc.moveTo(9, 4); cc.lineTo(17, -4); cc.moveTo(15, -6); cc.lineTo(19, -2); }, ink, 1.6);
+  stroke(c, (cc) => { cc.moveTo(-9, 4); cc.quadraticCurveTo(-15, 2, -11, -3); cc.moveTo(-6, 2); cc.quadraticCurveTo(0, -6, 6, 2); }, ink, 1.4);
+  for (let i = 0; i < 3; i++) dot(c, 20 + i * 1.6, 0 + i * 2.6, 0.8, '#5aa8e8');
+  c.restore();
+  // a pressed flower (pink) at the bottom of the left page
+  for (let i = 0; i < 5; i++) { const a = (i / 5) * TAU + 0.3; c.fillStyle = '#ff9ec0'; c.beginPath(); E(-24 + Math.cos(a) * 3, 15 + Math.sin(a) * 3, 2.6, 1.6, a)(c); c.fill(); }
+  dot(c, -24, 15, 1.4, '#ffd34a');
+  stroke(c, (cc) => { cc.moveTo(-24, 17); cc.quadraticCurveTo(-27, 21, -30, 23); }, '#6a9a4a', 1.1);
+  // right page: handwriting (flows as she speaks) and a doodled face — Карамель's own little self-portrait
+  const shown = s.talk > 0.05 ? 0.4 + 0.6 * ((s.t * 0.7) % 1) : 1;
+  c.save(); c.beginPath(); c.rect(2, -30, 40 * shown + 2, 60); c.clip();
+  for (const [y, x1] of [[12, 37], [17.5, 30], [23, 34]] as const) {
+    c.beginPath(); c.moveTo(6, y);
+    for (let x = 6, i = 0; x < x1; x += 2.2, i++) c.quadraticCurveTo(x + 1.1, y - 2.6 - (i % 3), x + 2.2, y);
+    c.strokeStyle = ink; c.lineWidth = 1.1; c.stroke();
+  }
+  c.restore();
+  // the doodle: round face, a bun with a leaf, expression from the line
+  const fx = 22, fy = -9;
+  stroke(c, (cc) => { cc.arc(fx, fy, 9.5, 0, TAU); }, ink, 1.5);
+  stroke(c, (cc) => { cc.arc(fx + 1, fy - 12, 4, 0, TAU); }, ink, 1.4);
+  stroke(c, (cc) => { cc.moveTo(fx + 4, fy - 15); cc.quadraticCurveTo(fx + 10, fy - 19, fx + 11, fy - 14); cc.quadraticCurveTo(fx + 7, fy - 13, fx + 4, fy - 15); }, '#4a8a3a', 1.3);
+  for (const sd of [-1, 1]) {
+    const ex = fx + sd * 3.6, ey = fy - 1.5;
+    if (s.blink || s.eye === 'squeeze') stroke(c, (cc) => { cc.moveTo(ex - 1.6, ey); cc.lineTo(ex + 1.6, ey); }, ink, 1.3);
+    else if (s.eye === 'arc') stroke(c, (cc) => { cc.moveTo(ex - 1.8, ey + 0.6); cc.quadraticCurveTo(ex, ey - 1.8, ex + 1.8, ey + 0.6); }, ink, 1.3);
+    else dot(c, ex, ey, s.expr === 'surprised' || s.expr === 'scared' ? 1.6 : 1.2, ink);
+  }
+  for (const sd of [-1, 1]) { c.fillStyle = 'rgba(255,120,150,0.4)'; c.beginPath(); E(fx + sd * 6, fy + 2.5, 2, 1.2)(c); c.fill(); }
+  const mo = s.open;
+  if (s.mouth === 'o' || mo > 0.25) { c.fillStyle = ink; c.beginPath(); E(fx, fy + 4.5, 1.6 + mo, 1 + mo * 2.2)(c); c.fill(); }
+  else if (s.mouth === 'frown' || s.mouth === 'wavy') stroke(c, (cc) => { cc.moveTo(fx - 3, fy + 5.5); cc.quadraticCurveTo(fx, fy + 3, fx + 3, fy + 5.5); }, ink, 1.3);
+  else stroke(c, (cc) => { cc.moveTo(fx - 3.2, fy + 3.6); cc.quadraticCurveTo(fx, fy + 6.6, fx + 3.2, fy + 3.6); }, ink, 1.3);
+  // the turning page corner when she speaks
+  if (flut > 0.3) toon(c, poly([40, -23 - flut, 30, -22, 39, -14]), '#f6e8c8', { lw: LD, off: 1, rim: null });
+  c.restore();
+};
+
+// ── Кар-Карыч: ворон Мадам Морок — чёрный, взъерошенный, жёлтый глаз, большой клюв, честный и ворчливый ──
+const voron: Paint = (c, s) => {
+  const ink = '#1c1a26', feath = '#26243a', featL = '#5a5a82';
+  // shoulders / folded wings
+  toon(c, (cc) => { cc.moveTo(-48, 70); cc.quadraticCurveTo(-46, 24, -20, 20); cc.lineTo(20, 20); cc.quadraticCurveTo(46, 24, 48, 70); cc.closePath(); }, feath, { off: 5, sh: '#15131f', rim: featL });
+  for (const sd of [-1, 1]) for (let i = 0; i < 3; i++) stroke(c, (cc) => { cc.moveTo(sd * (20 + i * 8), 30 + i * 4); cc.quadraticCurveTo(sd * (28 + i * 8), 44 + i * 4, sd * (24 + i * 7), 58); }, '#3e3c5a', 1.4);
+  // the head (a scruffy crest on top)
+  const crest = U(poly([-6, -24, -2, -38, 2, -25]), poly([0, -25, 8, -36, 7, -22]), poly([-12, -21, -14, -32, -4, -24]));
+  toon(c, crest, feath, { lw: LF, off: 1.5, sh: '#15131f', rim: featL });
+  const head = E(0, 0, 24, 25);
+  toon(c, head, feath, { off: 5, sh: '#15131f', rim: featL });
+  // chest ruff
+  toon(c, U(O(-8, 22, 6), O(0, 25, 6.5), O(8, 22, 6)), '#2e2c46', { lw: LF, off: 2, rim: featL });
+  // eyes: yellow, round, on pale bare eye-rings (so a closed / squinting eye still reads), heavy brows of feathers
+  for (const sd of [-1, 1]) toon(c, E(sd * 11, -4, 8.6, 8.8), '#5c5a80', { lw: LD, off: 1.5, rim: '#8a8ab0', sh: '#46446a' });
+  const fc: FaceCfg = { ex: 11, ey: -4, erx: 6, ery: 6.4, iris: '#f0b020', skin: '#5c5a80', sclera: '#fff6d8', irisK: 0.82, my: 0, mw: 0, blush: null, nose: null, brow: null, lid: 0.15 };
+  for (const sd of [-1, 1] as const) eye(c, { x: sd * 11, y: -4, rx: 6, ry: 6.4, side: sd, cfg: fc }, s);
+  for (const sd of [-1, 1] as const) brow(c, sd * 11, -4 - 6.4 * s.scale - 4.5 - s.browRaise, 13, s.browAng + 1, sd, '#8a8ab0', 3.2, true);
+  // the beak: upper and lower mandibles (the lower drops when he caws)
+  const open = Math.min(1, s.open * 1.4);
+  const lower: Path = (cc) => { cc.moveTo(-7, 9); cc.quadraticCurveTo(0, 12 + open * 9, 3, 18 + open * 10); cc.quadraticCurveTo(5, 12 + open * 6, 7, 9); cc.closePath(); };
+  toon(c, lower, '#3a3640', { lw: LF, off: 1.5, rim: '#8a8a9a' });
+  if (open > 0.1) flat(c, (cc) => { cc.moveTo(-5, 9); cc.quadraticCurveTo(0, 11 + open * 7, 4, 9); cc.closePath(); }, '#c8304a', 0);
+  const upper: Path = (cc) => { cc.moveTo(-9, 1); cc.quadraticCurveTo(0, -3, 9, 1); cc.quadraticCurveTo(8, 10, 3, 19); cc.quadraticCurveTo(-1, 12, -9, 1); cc.closePath(); };
+  toon(c, upper, '#4a4652', { lw: LF, off: 2, sh: '#2a2830', rim: '#9a9aaa' });
+  dot(c, -2.5, 4, 0.9, '#1a1820'); dot(c, 2.5, 4, 0.9, '#1a1820');
+  void ink;
+};
+
 const narrator: Paint = () => { /* drawn by the prologue's portrait (never reached) */ };
 
 const PAINT: Record<PortraitId, Paint> = {
   tosha: narrator, bublik: narrator, bear: narrator, narrator,
   pastila, noki, pryanik, zefirych, beze, ponchik, marmeladka, iriska, kamysh, svetlyachikha, netopyr, morok,
   shepot: (c, s) => shepotHidden(c, s), nochka, tenka, polnoch, kisloplyu, zhitel, presnyak,
+  karamel, voron, shurshik: (c, s) => shepotSeen(c, s),
 };
 
 // ───────────────────────── the lieutenants as little bat-mice (finale) ─────────────────────────
 type MouseKind = 'netopyr' | 'morok' | 'shepot' | 'nochka' | 'tenka';
-const MOUSE_KIND: Partial<Record<PortraitId, MouseKind>> = { netopyr: 'netopyr', morok: 'morok', shepot: 'shepot', nochka: 'nochka', tenka: 'tenka' };
+const MOUSE_KIND: Partial<Record<PortraitId, MouseKind>> = { netopyr: 'netopyr', morok: 'morok', shepot: 'shepot', shurshik: 'shepot', nochka: 'nochka', tenka: 'tenka' };
 
 function drawMouse(c: C, kind: MouseKind, s: St) {
   const fur = kind === 'tenka' ? '#8a6aaa' : kind === 'nochka' ? '#3a3248' : kind === 'shepot' ? '#8a8aa4' : kind === 'morok' ? '#4a5a5a' : '#5a3a76';

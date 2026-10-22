@@ -13,13 +13,16 @@ import { drawPortrait, PORTRAIT_INFO } from '../../../../art/portraits';
  * scene watchdog). The box is drawn for a line only while that very line is on screen (other modules' speech hooks
  * may share the dialog box — the hub's interludes use town/speech.ts directly).
  */
-export type Spk = 'tosha' | 'bublik' | 'narrator' | 'bear' | 'pastila' | 'noki' | 'zefirych' | 'marmeladka' | 'zhitel' | 'presnyak' | 'netopyr';
+export type Spk = 'tosha' | 'bublik' | 'narrator' | 'bear' | 'pastila' | 'noki' | 'zefirych' | 'marmeladka' | 'zhitel' | 'presnyak' | 'netopyr' | 'polnoch' | 'beze' | 'ponchik' | 'pryanik' | 'iriska' | 'karamel';
 
 interface Speaker { name: string; color: string; bg: string; who?: Who }
-const OWN: Record<'netopyr', Speaker> = {
-  netopyr: { name: PORTRAIT_INFO.netopyr.name, color: PORTRAIT_INFO.netopyr.color, bg: PORTRAIT_INFO.netopyr.bg },
+/** the town's speakers first; anybody else with a shared portrait (the Count, the King's voice…) by its portrait card */
+const spk = (id: Spk): Speaker => {
+  const t = TOWN[id as SpeakerId];
+  if (t) return t;
+  const p = (PORTRAIT_INFO as Record<string, { name: string; color: string; bg: string } | undefined>)[id];
+  return p ? { name: p.name, color: p.color, bg: p.bg } : TOWN.zhitel;
 };
-const spk = (id: Spk): Speaker => (id === 'netopyr' ? OWN.netopyr : TOWN[id as SpeakerId] ?? TOWN.zhitel);
 
 /** the line on screen and who says it (per dialog box) */
 const current = new WeakMap<Dialog, { id: Spk; str: string }>();

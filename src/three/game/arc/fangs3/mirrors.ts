@@ -231,7 +231,7 @@ export class BeamMirror implements Netted, Hittable3 {
 }
 
 let faceT: THREE.Texture | null = null;
-function mirrorTex() {
+export function mirrorTex() {
   return (faceT ??= canvasTex(128, 256, (g, w, h) => {
     const gr = g.createLinearGradient(0, 0, w, h);
     gr.addColorStop(0, '#dfe8ff'); gr.addColorStop(0.45, '#9aa8d0'); gr.addColorStop(0.55, '#c8d4f4'); gr.addColorStop(1, '#6a7aa8');
@@ -292,8 +292,9 @@ export class CrystalDoor {
 
 // ═════════════════════════════ REFLECTIONS ═════════════════════════════
 export interface Panel { c: THREE.Vector3; n: THREE.Vector3; u: THREE.Vector3; hw: number; y0: number; y1: number; fake?: boolean }
-export type GhostKind = 'hero' | 'servant' | 'boss' | 'exit';
-export interface GhostSrc { kind: GhostKind; pos: THREE.Vector3; h: number }
+export type GhostKind = 'hero' | 'servant' | 'boss' | 'exit' | 'girl';
+/** a thing the mirrors show; `flip` mirrors the picture (the girl points the other way) */
+export interface GhostSrc { kind: GhostKind; pos: THREE.Vector3; h: number; flip?: boolean; alpha?: number }
 
 /** a tall mirror panel (visual + collider unless fake); returns its Panel (normal = `facing` direction) */
 export function mirrorPanel(L: Level3D, B: Batch, x: number, y: number, z: number, w: number, h: number, facing: THREE.Vector3, o: { fake?: boolean; col?: boolean } = {}): Panel {
@@ -353,6 +354,22 @@ function silTex(kind: GhostKind) {
       g.beginPath(); g.moveTo(w / 2, h * 0.12); g.quadraticCurveTo(w * 0.95, h * 0.5, w * 0.98, h); g.lineTo(w * 0.02, h); g.quadraticCurveTo(w * 0.05, h * 0.5, w / 2, h * 0.12); g.fill();
       for (const s of [-1, 1]) { g.beginPath(); g.moveTo(w / 2 + s * 10, h * 0.16); g.quadraticCurveTo(w / 2 + s * 62, h * 0.0, w / 2 + s * 40, h * 0.24); g.fill(); }
       glow(w / 2 - 12, h * 0.24, 13, 'rgba(210,225,255,1)'); glow(w / 2 + 12, h * 0.24, 13, 'rgba(210,225,255,1)');
+    } else if (kind === 'girl') {
+      // the shadow without an owner (v2 закладка А): a girl with pigtails and a guitar on her back, pointing the way
+      glow(w / 2, h * 0.5, 70, 'rgba(150,120,255,0.35)');
+      g.fillStyle = 'rgba(26,14,48,0.95)';
+      g.beginPath(); g.arc(w / 2, h * 0.22, 17, 0, Math.PI * 2); g.fill();
+      for (const s of [-1, 1]) { g.beginPath(); g.ellipse(w / 2 + s * 22, h * 0.25, 6, 16, s * 0.35, 0, Math.PI * 2); g.fill(); }
+      // the guitar on her back (its neck over the shoulder)
+      g.save(); g.translate(w / 2 - 14, h * 0.5); g.rotate(0.45);
+      g.beginPath(); g.ellipse(0, 18, 17, 22, 0, 0, Math.PI * 2); g.fill(); g.fillRect(-3, -44, 6, 48); g.restore();
+      // a dress, legs
+      g.beginPath(); g.moveTo(w / 2 - 15, h * 0.31); g.lineTo(w / 2 + 15, h * 0.31); g.lineTo(w / 2 + 26, h * 0.68); g.lineTo(w / 2 - 26, h * 0.68); g.closePath(); g.fill();
+      g.fillRect(w / 2 - 15, h * 0.67, 10, h * 0.28); g.fillRect(w / 2 + 5, h * 0.67, 10, h * 0.28);
+      // the arm pointing out (to the right of the picture)
+      g.save(); g.translate(w / 2 + 12, h * 0.36); g.rotate(-0.5); g.fillRect(0, -4, 46, 9); g.beginPath(); g.arc(48, 0, 6, 0, Math.PI * 2); g.fill(); g.restore();
+      // eyes: two little lights
+      glow(w / 2 - 6, h * 0.22, 6, 'rgba(255,240,200,1)'); glow(w / 2 + 6, h * 0.22, 6, 'rgba(255,240,200,1)');
     } else {
       // the way out: a glowing arch with a little moon
       const gr = g.createLinearGradient(0, 0, 0, h);
@@ -380,7 +397,7 @@ export class Reflections {
   private ghost(i: number): Ghost {
     let g = this.pool[i];
     if (!g) {
-      const m = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, map: silTex('hero') });
+      const m = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, map: silTex('hero'), side: THREE.DoubleSide });
       m.polygonOffset = true; m.polygonOffsetFactor = -4;
       const mesh = new THREE.Mesh(this.geo, m);
       mesh.renderOrder = 9;
@@ -431,13 +448,13 @@ export class Reflections {
         g.used = true;
         g.mat.map = silTex(s.kind);
         const fade = clamp(1 - (Math.abs(along) - pnl.hw + size * 0.3) / (size * 0.5 + 0.01), 0, 1) * clamp(1 - (sd - 16) / 6, 0, 1);
-        const base = s.kind === 'hero' ? 0.42 : s.kind === 'exit' ? 0.85 + 0.15 * Math.sin(t * 3) : 0.95;
-        g.mat.opacity = base * fade;
+        const base = s.kind === 'hero' ? 0.42 : s.kind === 'exit' ? 0.85 + 0.15 * Math.sin(t * 3) : s.kind === 'girl' ? 0.8 + 0.15 * Math.sin(t * 2.2) : 0.95;
+        g.mat.opacity = base * fade * (s.alpha ?? 1);
         g.mesh.visible = g.mat.opacity > 0.02;
         g.mesh.position.copy(X).addScaledVector(pnl.n, 0.03);
         g.mesh.quaternion.setFromUnitVectors(v3.set(0, 0, 1), pnl.n);
         const aspect = 0.5;
-        g.mesh.scale.set(size * aspect * (s.kind === 'boss' ? 1.15 : 1), size, 1);
+        g.mesh.scale.set(size * aspect * (s.kind === 'boss' ? 1.15 : 1) * (s.flip ? -1 : 1), size, 1);
         // clip to the panel (cheap: shrink near the edges via the fade above)
       }
     }

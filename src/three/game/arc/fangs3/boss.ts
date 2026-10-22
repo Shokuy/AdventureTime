@@ -15,7 +15,8 @@ import type { BeamMirror } from './mirrors';
 import type { PollenFlower, Footprints } from './pollen';
 import type { Whispers } from './whisper';
 import { posSfx } from './whisper';
-import { BOSS, TOAST } from './lines';
+import { BOSS, TOAST, DECOY_ECHO } from './lines';
+import type { WateringCan, Puddles } from './can';
 
 /**
  * Шёпот — the invisible vampire of the dome (docs/script-fangs.md §7.3–7.5). You mostly don't see him:
@@ -56,7 +57,16 @@ export interface ShepotEnv {
   flowers: PollenFlower[];
   feet: Footprints;
   whispers: Whispers;
+  /** phase 3: Карамель's old watering can and its grey puddles (v2 §7.4) */
+  can: WateringCan;
+  puddles: Puddles;
+  /** phase 2: what the heroes said lately (the decoys echo it) */
+  heard: () => string[];
 }
+
+/** the can's states: off / floating after a hero / tilting (the telegraph, 0.9 s) / pouring / knocked to the floor */
+const CAN_OFF = 0, CAN_FLOAT = 1, CAN_TILT = 2, CAN_POUR = 3, CAN_DOWN = 4;
+const CAN_Y = 2.3, CAN_TILT_T = 0.9, CAN_POUR_T = 0.6;
 
 const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3();
 const pose: NetPose = { pos: new THREE.Vector3(), vel: new THREE.Vector3(), yaw: 0 };
@@ -110,6 +120,11 @@ export class Shepot3 implements Boss3Like, Netted {
   /** hits in the current window of being seen: the third one (unless stunned) and he blinks away */
   private windowHits = 0;
   private defeatT = -1;
+  /** the watering can (phase 3; host simulates, snapshots carry it) */
+  canMode = CAN_OFF;
+  canPos = new THREE.Vector3();
+  private canT = 0; private canCd = 3; private canRest = 0; private canTgt: HeroLike | null = null; private pudT = 0;
+  private canFall = 0;
   // client playback
   private track: NetTrack<number[]> | null = null;
   private got = false;
@@ -217,6 +232,7 @@ export class Shepot3 implements Boss3Like, Netted {
       if (this.stunT <= 0) { this.go('stalk'); this.retreat = 0.8; }
     } else this.brain(L, dt);
     this.decoySim(L, dt);
+    this.canSim(L, dt);
 
     // visibility
     const sun = K.sunAt(this.center(v1));
@@ -249,6 +265,7 @@ export class Shepot3 implements Boss3Like, Netted {
     if (!this.L.authority || !this.fighting) return;
     if (this.center(v1).distanceTo(at) < r + 1.2) { this.stunT = Math.max(this.stunT, 2.2); this.revealT = Math.max(this.revealT, 4); this.flash = 1; }
     for (const d of this.decoys) if (d.mode && d.pos.distanceTo(at) < r + 1.2) this.popDecoy(d);
+    if (this.canPos.distanceTo(at) < r + 1.2) this.knockCan(this.L);
   }
   /** shows him wherever he is (solo help: the story NPC's chord) */
   revealAll(secs: number) {
@@ -577,9 +594,94 @@ export class Shepot3 implements Boss3Like, Netted {
       this.clampArena(d.pos);
       // in the light it's just a whisper: gone
       if (vamp(L).sunAt(v1.copy(d.pos).setY(1)) > 0.25) { this.popDecoy(d); return; }
-      if ((d.whT -= dt) <= 0) { d.whT = rand(3.5, 6); this.whisper(d.pos.clone().setY(1.4), choose(BOSS.idle as unknown as string[])); }
+      // (v2 §7.4 phase 2: the decoys echo what the heroes said — funny, and it confuses)
+      if ((d.whT -= dt) <= 0) { d.whT = rand(3.5, 6); this.whisper(d.pos.clone().setY(1.4), this.echoLine()); }
     });
   }
+  /** a decoy's whisper: a hero's line said lately (its last words), or one of the stock echoes */
+  private echoLine() {
+    const heard = this.env.heard();
+    if (heard.length && Math.random() < 0.6) return choose(heard);
+    return Math.random() < 0.8 ? choose(DECOY_ECHO as unknown as string[]) : choose(BOSS.split as unknown as string[]);
+  }
+
+  // ───────────────────────── the watering can (phase 3) ─────────────────────────
+  private canSim(L: Level3D, dt: number) {
+    const K = vamp(L);
+    const P = this.env.puddles;
+    // the puddles drain colour: a hero standing in one is «пресный» (grey and slow) for 2 s
+    if ((this.pudT -= dt) <= 0) {
+      this.pudT = 0.4;
+      for (const h of L.alivePlayers()) if (P.inside(h.pos.x, h.pos.z, h.pos.y)) K.bland(h, 2);
+    }
+    const on = this.phase === 3 && this.fighting;
+    if (!on) { if (this.canMode !== CAN_OFF && this.canMode !== CAN_DOWN) this.canMode = CAN_OFF; if (this.canMode === CAN_DOWN && (this.canT += dt) > 3) this.canMode = CAN_OFF; return; }
+    this.canT += dt;
+    switch (this.canMode) {
+      case CAN_OFF:
+        if ((this.canCd -= dt) > 0) return;
+        // out of the dark, at his side
+        this.canPos.copy(this.pos).setY(CAN_Y + 0.6);
+        this.canMode = CAN_FLOAT; this.canT = 0; this.canRest = 1.2; this.canTgt = null;
+        this.whisper(this.center(), BOSS.water[0]);
+        this.toastOnce('can', TOAST.can);
+        return;
+      case CAN_FLOAT: {
+        const hs = L.alivePlayers().filter((h) => Math.hypot(h.pos.x - ARENA.c.x, h.pos.z - ARENA.c.z) < ARENA.R + 4 && h.pos.y < 4);
+        if (!this.canTgt || !hs.includes(this.canTgt)) this.canTgt = hs.length ? hs.reduce((a, b) => (a.pos.distanceTo(this.canPos) < b.pos.distanceTo(this.canPos) ? a : b)) : null;
+        const t = this.canTgt;
+        if (!t) { this.canPos.y = damp(this.canPos.y, CAN_Y + 0.6, 2, dt); return; }
+        const dx = t.pos.x - this.canPos.x, dz = t.pos.z - this.canPos.z, d = Math.hypot(dx, dz);
+        const sp = Math.min(3.6 + (L.heroes().length > 1 ? 0.4 : 0), d / Math.max(dt, 1e-3));
+        if (d > 0.01) { this.canPos.x += (dx / d) * sp * dt; this.canPos.z += (dz / d) * sp * dt; }
+        this.canPos.y = damp(this.canPos.y, t.pos.y + CAN_Y, 4, dt);
+        this.canRest -= dt;
+        // over the hero (or it has chased long enough): it stops and tilts — the telegraph
+        if (this.canRest <= 0 && (d < 0.6 || this.canT > 3.2)) { this.canMode = CAN_TILT; this.canT = 0; ambient(L, () => posSfx(L, 'mist', this.canPos, { pitch: 1.9, volume: 0.5 })); }
+        return;
+      }
+      case CAN_TILT:
+        if (this.canT >= CAN_TILT_T) {
+          this.canMode = CAN_POUR; this.canT = 0;
+          const gy = Math.max(0, L.phys.groundAt(this.canPos.x, this.canPos.z, this.canPos.y, 0.2));
+          const at = [Math.round(this.canPos.x * 10) / 10, Math.round((isFinite(gy) ? gy : 0) * 10) / 10, Math.round(this.canPos.z * 10) / 10];
+          this.puddleFx(at);
+          L.nl?.entEvent(this, 'pud', { p: at });
+          if (Math.random() < 0.5) this.whisper(this.canPos.clone().setY(1.6), BOSS.water[1]);
+        }
+        return;
+      case CAN_POUR:
+        if (this.canT >= CAN_POUR_T) { this.canMode = CAN_FLOAT; this.canT = 0; this.canRest = rand(1.6, 2.4) / (1 + 0.1 * (L.heroes().length - 1)); this.canTgt = null; }
+        return;
+      case CAN_DOWN:
+        // knocked to the floor: lies there a while, then he picks it up again (out of the dark)
+        if (this.canT > 4.5) { this.canMode = CAN_OFF; this.canCd = 2.5; }
+        return;
+    }
+  }
+  private puddleFx(p: number[]) {
+    const L = this.L;
+    this.env.puddles.add(p[0], p[2], p[1]);
+    ambient(L, () => {
+      L.fx.emit(new THREE.Vector3(p[0], p[1] + 0.3, p[2]), { count: 14, speed: [0.6, 2.2], dir: new THREE.Vector3(0, 1, 0), spread: 0.9, life: [0.4, 0.8], size: [0.12, 0.26], size2: 1.4, colors: ['#9a9aa8', '#c8c8d4', '#6a6a78'], g: 6, drag: 1 });
+      posSfx(L, 'drain', new THREE.Vector3(p[0], p[1], p[2]), { volume: 0.7, pitch: 0.8 });
+    });
+  }
+  /** host: a swing / a shot / a chord knocked the can out — he shows for 3 s */
+  private knockCan(L: Level3D) {
+    if (this.canMode === CAN_OFF || this.canMode === CAN_DOWN) return false;
+    this.canMode = CAN_DOWN; this.canT = 0;
+    this.revealT = Math.max(this.revealT, 3);
+    this.whisper(this.center(), BOSS.seen[0]);
+    shared(L, () => {
+      L.fx.sparks(this.canPos.clone(), 10, ['#d8e8e0', '#ffffff', '#c9a24a']);
+      audio.sfx('clang', { pitch: 1.3, volume: 0.8 });
+      L.hud.toast(TOAST.canHit, 3);
+    });
+    L.nl?.entEvent(this, 'canHit', {});
+    return true;
+  }
+
   private popDecoy(d: Decoy, back = true) {
     if (!d.mode) return;
     d.mode = 0;
@@ -603,6 +705,10 @@ export class Shepot3 implements Boss3Like, Netted {
       this.popDecoy(d); hit = true;
       this.whisper(d.pos.clone().setY(1.4), BOSS.idle[1]);
     }
+    // the can (it floats at head height over a hero: a swing from under it reaches it)
+    if (this.canMode >= CAN_FLOAT && this.canMode <= CAN_POUR && inReach(v2.set(this.canPos.x, this.canPos.y - CAN_Y, this.canPos.z), 0.7)) {
+      if (this.knockCan(L)) hit = true;
+    }
     if (inReach(this.pos, 0.75)) {
       hit = true;
       if (kind === 'chord') this.chordNear(this.center(), 1);
@@ -614,6 +720,7 @@ export class Shepot3 implements Boss3Like, Netted {
   shotHit(L: Level3D, s: Shot3): boolean {
     if (!L.authority || !this.fighting) return false;
     for (const d of this.decoys) if (d.mode && s.pos.distanceTo(v1.copy(d.pos).setY(1.3)) < 0.9) { this.popDecoy(d); return true; }
+    if (this.canMode >= CAN_FLOAT && this.canMode <= CAN_POUR && s.pos.distanceTo(this.canPos) < 0.9) { this.knockCan(L); return true; }
     if (s.pos.distanceTo(this.center(v1)) > 1.0) return false;
     const by = s.shooter;
     const prev = L.attacker;
@@ -683,17 +790,18 @@ export class Shepot3 implements Boss3Like, Netted {
     for (let i = 0; i < 2; i++) L.dropPickup('heart', ARENA.c.clone().setY(1.2));
     if (n === 2) {
       this.go('split', 1.2);
-      this.whisper(this.center(), BOSS.idle[1]);
+      this.whisper(this.center(), BOSS.split[0]);
       shared(L, () => L.hud.toast(TOAST.split, 6));
       this.decoys.forEach((d, i) => { d.back = 0.3 + i * 0.25; });
     } else {
       this.go('darken', 1.6);
       this.dark = 1;
-      this.whisper(this.center(), BOSS.snuff[1]);
+      this.whisper(this.center(), BOSS.snuff[0]);
       for (const l of this.env.lanterns) if (l.lit) l.snuff();
       this.env.mirrors.forEach((m, i) => { if (m.locked) m.turnAway(2 + i); });
       shared(L, () => L.hud.toast(TOAST.dark, 7));
       this.snuffCd = 10; this.mirrorCd = 14;
+      this.canCd = 3.5; this.canMode = CAN_OFF;
     }
     L.nl?.entEvent(this, 'phase', { n });
     this.phaseFx(n);
@@ -712,6 +820,7 @@ export class Shepot3 implements Boss3Like, Netted {
     this.defeatT = 0;
     this.dark = 0;
     for (const d of this.decoys) this.popDecoy(d, false);
+    if (this.canMode !== CAN_OFF) { this.canMode = CAN_DOWN; this.canT = 0; }
     L.hud.bossMax = 0;
     for (let i = 0; i < 8; i++) L.dropPickup(Math.random() < 0.3 ? 'bigcrumb' : 'crumb', this.center());
     L.dropPickup('heart', this.center());
@@ -722,6 +831,7 @@ export class Shepot3 implements Boss3Like, Netted {
   netSnap(): number[] {
     const out = [this.pos.x, this.pos.y, this.pos.z, this.yaw, STATES.indexOf(this.state), this.st, this.visGoal, this.hp, this.phase, this.dark, this.seq % 1000, this.flash > 0.5 ? 1 : 0, this.active ? 1 : 0];
     for (const d of this.decoys) out.push(d.mode, d.pos.x, d.pos.z);
+    out.push(this.canMode, this.canPos.x, this.canPos.y, this.canPos.z, this.canT);
     return out;
   }
   netApply(a: number[], t?: number) {
@@ -737,6 +847,8 @@ export class Shepot3 implements Boss3Like, Netted {
     if (a[11]) this.anim.flash = 1;
     this.active = !!a[12];
     this.decoys.forEach((d, i) => { d.mode = a[13 + i * 3] | 0; });
+    const ci = 13 + MAX_DECOYS * 3;
+    if (a.length > ci) { const m = a[ci] | 0; if (m !== this.canMode) this.canT = a[ci + 4]; this.canMode = m; }
     this.got = true;
   }
   netEvent(L: Level3D, ev: string, d: { p?: number[]; s?: string | number; n?: number }) {
@@ -746,6 +858,8 @@ export class Shepot3 implements Boss3Like, Netted {
       case 'shard': { const s = typeof d.s === 'number' ? (L.nl?.get(d.s) as unknown as Shot3 | undefined) : undefined; if (s) shardLook(s.obj); break; }
       case 'noon': this.noonFx(); break;
       case 'phase': this.phaseFx(d.n ?? 2); break;
+      case 'pud': if (d.p) this.puddleFx(d.p); break;
+      case 'canHit': L.fx.sparks(this.canPos.clone(), 10, ['#d8e8e0', '#ffffff', '#c9a24a']); audio.sfx('clang', { pitch: 1.3, volume: 0.8 }); L.hud.toast(TOAST.canHit, 3); break;
     }
   }
 
@@ -764,6 +878,8 @@ export class Shepot3 implements Boss3Like, Netted {
         if (d.pos.distanceTo(v1.set(x, 0, z)) > 4) d.pos.set(x, 0, z);
         else { d.vel.set((x - d.pos.x) / Math.max(dt, 1e-3), 0, (z - d.pos.z) / Math.max(dt, 1e-3)); d.pos.set(x, 0, z); }
       });
+      const ci = 14 + MAX_DECOYS * 3; // (the can's x: right after its mode, past the decoys)
+      if (this.canMode !== CAN_DOWN) this.canPos.set(tr.lerp(ci), tr.lerp(ci + 1), tr.lerp(ci + 2));
     }
   }
 
@@ -815,6 +931,9 @@ export class Shepot3 implements Boss3Like, Netted {
       else d.mark.hide();
       if (dsp > 0.5) this.env.feet.track(d, d.pos, 1.4);
     }
+    // the watering can
+    this.canVisual(L, dt);
+    this.env.puddles.update(dt);
     // the dome darkens (phase 3) and lightens again
     this.darkK = damp(this.darkK, this.dark, 1.5, dt);
     this.applyDark(L);
@@ -822,6 +941,39 @@ export class Shepot3 implements Boss3Like, Netted {
     if (this.active && !this.beaten) { L.hud.bossName = this.name; L.hud.bossHp = this.hp; L.hud.bossMax = this.maxHp; }
     else L.hud.bossMax = 0;
     this.blob.visible = this.vis > 0.4;
+  }
+
+  private canVisual(L: Level3D, dt: number) {
+    const c = this.env.can, m = this.canMode;
+    if (!L.authority) this.canT += L.nl?.playDt ?? dt;
+    if (m === CAN_OFF) {
+      // (picked up again by the invisible one; before phase 3 the can lies where the cold open left it)
+      if (this.active && this.phase === 3 && !this.beaten) c.root.visible = false;
+      c.pour = 0; c.update(dt);
+      return;
+    }
+    c.root.visible = true;
+    if (m === CAN_DOWN) {
+      // falls and lies on the floor
+      if (!c.lying) { this.canFall = Math.max(0.2, this.canPos.y); c.lying = true; }
+      this.canFall = Math.max(0, this.canFall - dt * 6);
+      c.root.position.set(this.canPos.x, this.canFall, this.canPos.z);
+      c.pour = 0; c.tilt = 0;
+      c.update(dt);
+      return;
+    }
+    c.lying = false;
+    // it turns its spout toward the one it follows; the rose (not the tank) is over the spot it pours on
+    const t = this.canTgt ?? (L.alivePlayers()[0] ?? null);
+    if (t && m === CAN_FLOAT && Math.hypot(t.pos.x - this.canPos.x, t.pos.z - this.canPos.z) > 0.3) {
+      const want = Math.atan2(t.pos.x - this.canPos.x, t.pos.z - this.canPos.z);
+      c.root.rotation.y += Math.atan2(Math.sin(want - c.root.rotation.y), Math.cos(want - c.root.rotation.y)) * Math.min(1, dt * 4);
+    }
+    const yaw = c.root.rotation.y;
+    c.root.position.set(this.canPos.x - Math.sin(yaw) * 0.62, this.canPos.y - 0.5, this.canPos.z - Math.cos(yaw) * 0.62);
+    c.tilt = m === CAN_TILT ? clamp(this.canT / CAN_TILT_T, 0, 1) * 0.75 : m === CAN_POUR ? 1 : 0;
+    c.pour = m === CAN_TILT ? 0.12 : m === CAN_POUR ? 1 : 0;
+    c.update(dt, Math.max(0, this.canPos.y - CAN_Y));
   }
 
   private applyDark(L: Level3D) {

@@ -231,9 +231,13 @@ function hall(L: Level3D) {
   b.m(gable(11.3, 39), M.slate(), 0, 12 + 5.65 * 0.45, -16.5, { sy: 0.45 });
   L.add(b.done(0, 0, 0));
   // portraits (their eyes follow you) — and Ноки's, a hundred years ago
-  const deco: [PaintKind, number, number, number][] = [['lady', -1, 3.2, -1.5], ['knight', 1, 3.2, -1.5], ['candy', -1, 3.2, -10], ['bear', 1, 3.2, -10], ['baker', -1, 3.2, -31], ['owl', 1, 3.2, -31], ['candy', -1, 3.2, -6], ['lady', 1, 3.2, -14.5]];
+  const deco: [PaintKind, number, number, number][] = [['lady', -1, 3.2, -1.5], ['candy', -1, 3.2, -10], ['baker', -1, 3.2, -31], ['owl', 1, 3.2, -31]];
   for (const [k, s, y, z] of deco) portraitDeco(L, k, s * 7.42, y, z, s > 0 ? -Math.PI / 2 : Math.PI / 2);
-  const noki = portraitDeco(L, 'girl', 7.42, 3.0, -6, -Math.PI / 2, { w: 1.6, h: 2.2 });
+  // (v2 §9.2.1) next to Ноки's portrait: the servants as they were before the deal, with plaques on the frames
+  const P = F5.formerPlaques;
+  const former: [PaintKind, number, number, string][] = [['tailor', 1, -1.5, P.tailor], ['frog', 1, -10, P.frog], ['eared', 1, -14.5, P.eared], ['sisters', -1, -6, P.sisters]];
+  for (const [k, s, z, plaque] of former) portraitDeco(L, k, s * 7.42, 3.2, z, s > 0 ? -Math.PI / 2 : Math.PI / 2, { w: k === 'sisters' ? 2.1 : 1.6, h: 2.1, plaque });
+  const noki = portraitDeco(L, 'girl', 7.42, 3.0, -6, -Math.PI / 2, { w: 1.6, h: 2.2, plaque: P.girl });
   L.refs.f5nokiPortrait = noki.root;
   // the four lieutenants and the candles under them: I and III on the west wall, II and IV on the east
   const lieut: [PaintKind, number, number][] = [['netopyr', -1, -18], ['morok', 1, -18], ['shepot', -1, -26], ['twins', 1, -26]];

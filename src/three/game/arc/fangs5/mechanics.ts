@@ -77,6 +77,7 @@ export class Siege implements Netted, Actor3 {
         this.state = 1;
         L.hud.showBanner('ОСАДА!', '#ff5a4a');
         L.toast(F5.toasts.siege);
+        L.shout(F5.siegeShout, 2.6); // (v2 §9.2.0: the voice from the moon)
         audio.sfx('warn'); audio.sfx('roar', { pitch: 1.6, volume: 0.4 });
         this.waveT = 6;
       }
@@ -113,6 +114,7 @@ export class Siege implements Netted, Actor3 {
     L.seen.add('f5_siege');
     L.hud.showBanner('ВСЕ СОЛНЫШКИ ГОРЯТ!', '#ffd34a');
     L.toast(F5.toasts.siegeDone);
+    L.shout(F5.siegeWonShout, 2.4);
     audio.sfx('victory', { volume: 0.6 }); audio.sfx('door', { pitch: 0.6 });
     L.tcam.shake(0.4);
     // the sunburst: every vampire in the courtyard burns away
@@ -337,7 +339,10 @@ export function portraitDeco(L: Level3D, kind: PaintKind, x: number, y: number, 
   const w = o.w ?? 1.6, h = o.h ?? 2.1;
   const root = new THREE.Group();
   const fr = framedPainting(root, M, kind, w, h, '#a8843a');
-  const eyes = eyePair(fr.g, 0, h * (1 - 0.42), 0.04, kind === 'twins' ? 0.42 : Math.min(0.24, 0.16 * (w / 1.6)), Math.min(0.11, 0.085 * (w / 1.6)));
+  // (the eyes sit where the painted ones are: the frog's on top of her head, the sisters' far apart)
+  const ey = kind === 'sisters' ? 0.49 : kind === 'frog' ? 0.31 : 0.42;
+  const edx = kind === 'twins' ? 0.42 : kind === 'sisters' ? 0.39 * (w / 2.1) : kind === 'frog' ? 0.19 * (w / 1.6) : Math.min(0.24, 0.16 * (w / 1.6));
+  const eyes = eyePair(fr.g, 0, h * (1 - ey), 0.04, edx, Math.min(0.11, 0.085 * (w / 1.6)));
   root.position.set(x, y, z);
   root.rotation.y = ry;
   L.scene.add(root);
